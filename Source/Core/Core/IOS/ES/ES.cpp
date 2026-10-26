@@ -544,6 +544,8 @@ void ESDevice::DoState(PointerWrap& p)
     context.DoState(p);
 
   p.Do(m_pending_ppc_boot_content_path);
+  // d2x's ES settings outlive this instance, but a savestate restores them too.
+  p.Do(s_d2x);
 }
 
 ESDevice::ContextArray::iterator ESDevice::FindActiveContext(s32 fd)
@@ -856,7 +858,14 @@ u64 ESDevice::D2xLaunchTarget(u64 title_id)
 
   if (title_id == Titles::SYSTEM_MENU)
   {
-    // d2x turns its NAND emulation off here first (step 2 of RIFTWII-D2X.md).
+    // d2x turns its NAND emulation off first, with or without a stand-in, so
+    // the title's TMD and ticket come from the real NAND (step 2 of
+    // RIFTWII-D2X.md).
+    if (GetEmulationKernel().GetFSCore().IsD2xNandEmulated())
+    {
+      NOTICE_LOG_FMT(IOS_ES, "d2x: NAND emulation off for the Wii Menu launch");
+      GetEmulationKernel().GetFSCore().StopD2xNandEmulation();
+    }
     if (s_d2x.system_menu_stand_in != 0)
     {
       NOTICE_LOG_FMT(IOS_ES, "d2x: launching {:016x} in place of the Wii Menu",

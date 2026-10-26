@@ -97,6 +97,14 @@ FSCore::FSCore(Kernel& ios) : m_ios(ios)
 
 FSCore::~FSCore() = default;
 
+void FSCore::StopD2xNandEmulation()
+{
+  if (const auto d2x_fs = m_ios.GetD2xFS())
+    d2x_fs->SetMode(0, "");
+  m_d2x_mode = 0;
+  m_d2x_nand_path.fill(0);
+}
+
 FSDevice::FSDevice(EmulationKernel& ios, FSCore& core, const std::string& device_name)
     : EmulationDevice(ios, device_name), m_core(core)
 {
@@ -823,9 +831,7 @@ IPCReply FSDevice::D2xSetMode(const IOCtlVRequest& request)
 
   if ((mode & (D2X_MODE_SD | D2X_MODE_USB)) == 0)
   {
-    GetEmulationKernel().GetD2xFS()->SetMode(0, "");
-    m_core.m_d2x_mode = 0;
-    m_core.m_d2x_nand_path.fill(0);
+    m_core.StopD2xNandEmulation();
     INFO_LOG_FMT(IOS, "/dev/fs: d2x NAND emulation off (mode {:#x})", mode);
     return GetFSReply(IPC_SUCCESS);
   }
