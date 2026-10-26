@@ -375,6 +375,7 @@ private:
   IPCReply D2xSetFakeIosLaunch(const IOCtlVRequest& request);
   IPCReply D2xSetFakeSystemMenuLaunch(const IOCtlVRequest& request);
   u64 D2xLaunchTarget(u64 title_id);
+  ES::TicketReader D2xMissingTitleTicket(u64 title_id);
   bool IsEmulatedOrD2xSlot(u64 title_id);
   IPCReply SetUpStreamKey(const Context& context, const IOCtlVRequest& request);
   IPCReply DeleteStreamKey(const IOCtlVRequest& request);
