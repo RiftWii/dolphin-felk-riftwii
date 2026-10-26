@@ -132,6 +132,11 @@ public:
 
   u32 GetVersion() const;
 
+  // RiftWii's tests (RIFTWII-D2X.md): a d2x cIOS runs in this slot. GetVersion()
+  // then gives the base IOS d2x is built on, whose devices and features Dolphin
+  // uses; the slot and d2x's revision are what the PPC sees at 0x80003140.
+  bool IsD2x() const { return m_d2x_base != 0; }
+
   IOSC& GetIOSC();
 
 protected:
@@ -142,6 +147,7 @@ protected:
 
   bool m_is_responsible_for_nand_root = false;
   u64 m_title_id = 0;
+  u32 m_d2x_base = 0;  // the base IOS of a d2x slot; 0 when not d2x
 
   IOSC m_iosc;
   std::shared_ptr<FS::FileSystem> m_fs;

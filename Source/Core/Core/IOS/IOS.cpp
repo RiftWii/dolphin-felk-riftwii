@@ -5,9 +5,11 @@
 
 #include <algorithm>
 #include <array>
+#include <cctype>
 #include <deque>
 #include <map>
 #include <memory>
+#include <optional>
 #include <string>
 #include <utility>
 
@@ -15,7 +17,10 @@
 #include "Common/ChunkFile.h"
 #include "Common/CommonTypes.h"
 #include "Common/EnumUtils.h"
+#include <fmt/format.h>
+
 #include "Common/Logging/Log.h"
+#include "Common/Swap.h"
 #include "Common/Timer.h"
 
 #include "Core/Boot/AncastTypes.h"
@@ -55,6 +60,7 @@
 #include "Core/IOS/USB/USB_HID/HIDv5.h"
 #include "Core/IOS/USB/USB_KBD.h"
 #include "Core/IOS/USB/USB_VEN/VEN.h"
+#include "Core/IOS/Uids.h"
 #include "Core/IOS/VersionInfo.h"
 #include "Core/IOS/WFS/WFSI.h"
 #include "Core/IOS/WFS/WFSSRV.h"
@@ -305,22 +311,86 @@ Kernel::Kernel(u64 title_id) : m_title_id(title_id)
 {
 }
 
+// RiftWii's tests (RIFTWII-D2X.md): d2x's version block. A d2x cIOS starts its
+// first content with it, and loaders (RiftWii, USB Loader GX) read it there to
+// recognise d2x: magic 1ee7c105, block version 1, the name ("d2x...") at 0x10,
+// and the base IOS d2x is built on in byte 0x0F.
+struct D2xSlot
+{
+  u32 base;
+  u16 revision;  // the slot's title version, as IOS reports it
+};
+
+static std::optional<D2xSlot> FindD2xSlot(FS::FileSystem& fs, u64 ios_title_id)
+{
+  constexpr u32 D2X_MAGIC = 0x1ee7c105;
+  constexpr size_t TMD_VERSION = 0x1dc;
+  constexpr size_t TMD_FIRST_CONTENT = 0x1e4;
+
+  const u32 slot = static_cast<u32>(ios_title_id);
+  if ((ios_title_id >> 32) != 1 || slot < 200 || slot > 255)
+    return std::nullopt;
+
+  const std::string content_dir = fmt::format("/title/00000001/{:08x}/content", slot);
+  std::array<u8, TMD_FIRST_CONTENT + 4> tmd{};
+  const auto tmd_file = fs.OpenFile(PID_KERNEL, PID_KERNEL, content_dir + "/title.tmd", FS::Mode::Read);
+  if (!tmd_file || !tmd_file->Read(tmd.data(), tmd.size()))
+    return std::nullopt;
+
+  const u32 content_id = Common::swap32(&tmd[TMD_FIRST_CONTENT]);
+  std::array<u8, 0x40> block{};
+  const auto content = fs.OpenFile(PID_KERNEL, PID_KERNEL,
+                                   fmt::format("{}/{:08x}.app", content_dir, content_id), FS::Mode::Read);
+  if (!content || !content->Read(block.data(), block.size()))
+    return std::nullopt;
+
+  if (Common::swap32(&block[0]) != D2X_MAGIC || Common::swap32(&block[4]) != 1)
+    return std::nullopt;
+  for (size_t i = 0; i < 3; ++i)
+  {
+    if (std::tolower(block[0x10 + i]) != "d2x"[i])
+      return std::nullopt;
+  }
+
+  const u32 base = block[0x0f];
+  const auto& values = GetMemoryValues();
+  const bool known_base = std::any_of(values.begin(), values.end(),
+                                      [base](const MemoryValues& v) { return v.ios_number == base; });
+  if (!known_base)
+    return std::nullopt;
+  return D2xSlot{base, Common::swap16(&tmd[TMD_VERSION])};
+}
+
 EmulationKernel::EmulationKernel(Core::System& system, u64 title_id)
     : Kernel(title_id), m_system(system)
 {
   INFO_LOG_FMT(IOS, "Starting IOS {:016x}", title_id);
 
-  if (!SetupMemory(m_system.GetMemory(), title_id, MemorySetupType::IOSReload))
+  if (title_id != Titles::MIOS)
+  {
+    m_fs = FS::MakeFileSystem(IOS::HLE::FS::Location::Session, Core::GetActiveNandRedirects());
+    ASSERT(m_fs);
+  }
+
+  // A slot with d2x's version block runs as the base IOS it names (RIFTWII-D2X.md).
+  const std::optional<D2xSlot> d2x = m_fs ? FindD2xSlot(*m_fs, title_id) : std::nullopt;
+  if (d2x)
+  {
+    m_d2x_base = d2x->base;
+    NOTICE_LOG_FMT(IOS, "IOS{} is d2x on base IOS{}, revision {}", static_cast<u32>(title_id),
+                   d2x->base, d2x->revision);
+  }
+  auto& memory = m_system.GetMemory();
+  if (!SetupMemory(memory, d2x ? Titles::IOS(d2x->base) : title_id, MemorySetupType::IOSReload))
     WARN_LOG_FMT(IOS, "No information about this IOS -- cannot set up memory values");
+  else if (d2x)
+    memory.Write_U32((static_cast<u32>(title_id) << 16) | d2x->revision, ADDR_IOS_VERSION);
 
   if (title_id == Titles::MIOS)
   {
     MIOS::Load(m_system);
     return;
   }
-
-  m_fs = FS::MakeFileSystem(IOS::HLE::FS::Location::Session, Core::GetActiveNandRedirects());
-  ASSERT(m_fs);
 
   AddDevice(std::make_unique<AesDevice>(*this, "/dev/aes"));
   AddDevice(std::make_unique<ShaDevice>(*this, "/dev/sha"));
@@ -346,6 +416,8 @@ EmulationKernel::~EmulationKernel()
 // are used for the IOS major version -- which is what we want here.
 u32 Kernel::GetVersion() const
 {
+  if (m_d2x_base != 0)
+    return m_d2x_base;
   return static_cast<u32>(m_title_id);
 }
 
@@ -870,6 +942,7 @@ void EmulationKernel::DoState(PointerWrap& p)
   p.Do(m_last_reply_time);
   p.Do(m_ipc_paused);
   p.Do(m_title_id);
+  p.Do(m_d2x_base);
   p.Do(m_ppc_uid);
   p.Do(m_ppc_gid);
 
