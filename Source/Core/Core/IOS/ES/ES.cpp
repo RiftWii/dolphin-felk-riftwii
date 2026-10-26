@@ -792,9 +792,8 @@ std::optional<IPCReply> ESDevice::Launch(const IOCtlVRequest& request)
   if (GetEmulationKernel().IsD2x())
     title_id = D2xLaunchTarget(title_id);
 
-  // Prevent loading installed IOSes that are not emulated. A d2x slot runs as its
-  // base IOS (RIFTWII-D2X.md).
-  if (!IsEmulated(title_id) && !HasD2xSlot(*GetEmulationKernel().GetFS(), title_id))
+  // Prevent loading installed IOSes that are not emulated.
+  if (!IsEmulatedOrD2xSlot(title_id))
     return IPCReply(FS_ENOENT);
 
   // IOS replies to the request through the mailbox on failure, and acks if the launch succeeds.
@@ -806,6 +805,14 @@ std::optional<IPCReply> ESDevice::Launch(const IOCtlVRequest& request)
   // (one from the previous IOS for this IPC request, and one from the new one as it boots).
   // Nothing should be written to the command buffer if the launch succeeded for obvious reasons.
   return std::nullopt;
+}
+
+// Whether Dolphin can run this IOS: one it emulates, or a d2x slot, which runs as
+// its base IOS (RIFTWII-D2X.md). Ticket views and ES_Launch both ask, so a loader
+// sees the slot as installed and can reload into it, as on a Wii.
+bool ESDevice::IsEmulatedOrD2xSlot(u64 title_id)
+{
+  return IsEmulated(title_id) || HasD2xSlot(*GetEmulationKernel().GetFS(), title_id);
 }
 
 // d2x's ioctlv 0xA0: a mode, and the slot to restart (249 without one). Refused
