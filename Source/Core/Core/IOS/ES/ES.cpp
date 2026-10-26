@@ -37,6 +37,24 @@ namespace IOS::HLE
 {
 namespace
 {
+// RiftWii's tests (RIFTWII-D2X.md step 3): d2x's ES settings. d2x saves them
+// across the IOS reloads it redirects, so they live outside the ES instance,
+// which a reload replaces. Cleared when a slot that isn't d2x boots.
+struct D2xEsConfig
+{
+  u32 fake_launch = 0;       // ioctlv 0xA0's mode: a disc game's IOS reload restarts the cIOS
+  u32 ios = 249;             // the slot to restart in its place
+  u64 game_title_id = 0;     // the disc game whose reload was redirected
+  u64 system_menu_stand_in = 0;  // ioctlv 0xA1: launched in place of the Wii Menu
+};
+D2xEsConfig s_d2x;
+
+bool IsDiscGame(u64 title_id)
+{
+  const u32 type = static_cast<u32>(title_id >> 32);
+  return type == 0x00010000 || type == 0x00010004;
+}
+
 struct DirectoryToCreate
 {
   const char* path;
@@ -112,6 +130,9 @@ ESCore::~ESCore() = default;
 ESDevice::ESDevice(EmulationKernel& ios, ESCore& core, const std::string& device_name)
     : EmulationDevice(ios, device_name), m_core(core)
 {
+  if (!ios.IsD2x())
+    s_d2x = {};
+
   auto& system = ios.GetSystem();
   if (Core::IsRunning(system))
   {
@@ -721,6 +742,15 @@ std::optional<IPCReply> ESDevice::IOCtlV(const IOCtlVRequest& request)
                         Common::Log::LogLevel::LERROR);
     return IPCReply(IPC_EINVAL);
 
+  case IOCTL_ES_D2X_SET_FAKE_IOS_LAUNCH:
+    if (GetEmulationKernel().IsD2x())
+      return D2xSetFakeIosLaunch(request);
+    return IPCReply(IPC_EINVAL);
+  case IOCTL_ES_D2X_SET_FAKE_SM_LAUNCH:
+    if (GetEmulationKernel().IsD2x())
+      return D2xSetFakeSystemMenuLaunch(request);
+    return IPCReply(IPC_EINVAL);
+
   case IOCTL_ES_INVALID_3F:
   default:
     return IPCReply(IPC_EINVAL);
@@ -748,7 +778,7 @@ std::optional<IPCReply> ESDevice::Launch(const IOCtlVRequest& request)
   auto& system = GetSystem();
   auto& memory = system.GetMemory();
 
-  const u64 title_id = memory.Read_U64(request.in_vectors[0].address);
+  u64 title_id = memory.Read_U64(request.in_vectors[0].address);
   const u32 view = memory.Read_U32(request.in_vectors[1].address);
   const u64 ticketid = memory.Read_U64(request.in_vectors[1].address + 4);
   const u32 devicetype = memory.Read_U32(request.in_vectors[1].address + 12);
@@ -758,8 +788,13 @@ std::optional<IPCReply> ESDevice::Launch(const IOCtlVRequest& request)
   INFO_LOG_FMT(IOS_ES, "IOCTL_ES_LAUNCH {:016x} {:08x} {:016x} {:08x} {:016x} {:04x}", title_id,
                view, ticketid, devicetype, titleid, access);
 
-  // Prevent loading installed IOSes that are not emulated.
-  if (!IsEmulated(title_id))
+  // d2x launches its own slot, or a stand-in title, in place of some requests.
+  if (GetEmulationKernel().IsD2x())
+    title_id = D2xLaunchTarget(title_id);
+
+  // Prevent loading installed IOSes that are not emulated. A d2x slot runs as its
+  // base IOS (RIFTWII-D2X.md).
+  if (!IsEmulated(title_id) && !HasD2xSlot(*GetEmulationKernel().GetFS(), title_id))
     return IPCReply(FS_ENOENT);
 
   // IOS replies to the request through the mailbox on failure, and acks if the launch succeeds.
@@ -771,6 +806,70 @@ std::optional<IPCReply> ESDevice::Launch(const IOCtlVRequest& request)
   // (one from the previous IOS for this IPC request, and one from the new one as it boots).
   // Nothing should be written to the command buffer if the launch succeeded for obvious reasons.
   return std::nullopt;
+}
+
+// d2x's ioctlv 0xA0: a mode, and the slot to restart (249 without one). Refused
+// while a title runs (d2x's "stealth" rule: after ES_Identify or a disc's DIVerify).
+IPCReply ESDevice::D2xSetFakeIosLaunch(const IOCtlVRequest& request)
+{
+  if (request.in_vectors.empty() || request.in_vectors[0].size < sizeof(u32))
+    return IPCReply(ES_EINVAL);
+  if (m_core.m_title_context.active)
+    return IPCReply(IPC_ENOENT);
+
+  auto& memory = GetSystem().GetMemory();
+  s_d2x.fake_launch = memory.Read_U32(request.in_vectors[0].address);
+  s_d2x.ios = request.in_vectors.size() > 1 && request.in_vectors[1].size >= sizeof(u32) ?
+                  memory.Read_U32(request.in_vectors[1].address) :
+                  249;
+  s_d2x.game_title_id = 0;
+  NOTICE_LOG_FMT(IOS_ES, "d2x: IOS reload block mode {}, slot {}", s_d2x.fake_launch, s_d2x.ios);
+  return IPCReply(IPC_SUCCESS);
+}
+
+// d2x's ioctlv 0xA1: the title launched in place of the Wii Menu (0: none).
+IPCReply ESDevice::D2xSetFakeSystemMenuLaunch(const IOCtlVRequest& request)
+{
+  if (request.in_vectors.empty() || request.in_vectors[0].size < sizeof(u64))
+    return IPCReply(ES_EINVAL);
+  if (m_core.m_title_context.active)
+    return IPCReply(IPC_ENOENT);
+
+  s_d2x.system_menu_stand_in = GetSystem().GetMemory().Read_U64(request.in_vectors[0].address);
+  NOTICE_LOG_FMT(IOS_ES, "d2x: the Wii Menu is replaced by {:016x}", s_d2x.system_menu_stand_in);
+  return IPCReply(IPC_SUCCESS);
+}
+
+// What d2x launches for an ES_Launch of `title_id`: the stand-in for the Wii
+// Menu, or its own slot for a disc game's first IOS reload while the block is on.
+u64 ESDevice::D2xLaunchTarget(u64 title_id)
+{
+  if (!IsTitleType(title_id, ES::TitleType::System))
+    return title_id;
+
+  if (title_id == Titles::SYSTEM_MENU)
+  {
+    // d2x turns its NAND emulation off here first (step 2 of RIFTWII-D2X.md).
+    if (s_d2x.system_menu_stand_in != 0)
+    {
+      NOTICE_LOG_FMT(IOS_ES, "d2x: launching {:016x} in place of the Wii Menu",
+                     s_d2x.system_menu_stand_in);
+      return s_d2x.system_menu_stand_in;
+    }
+    return title_id;
+  }
+
+  const u32 ios = static_cast<u32>(title_id);
+  if (s_d2x.fake_launch == 0 || ios < 3 || ios > 255 || s_d2x.game_title_id != 0)
+    return title_id;
+  if (m_core.m_title_context.active && IsDiscGame(m_core.m_title_context.tmd.GetTitleId()))
+  {
+    s_d2x.game_title_id = m_core.m_title_context.tmd.GetTitleId();
+    NOTICE_LOG_FMT(IOS_ES, "d2x: {:016x} asked for IOS{}; restarting IOS{} in its place",
+                   s_d2x.game_title_id, ios, s_d2x.ios);
+    return Titles::IOS(s_d2x.ios);
+  }
+  return title_id;
 }
 
 std::optional<IPCReply> ESDevice::LaunchBC(const IOCtlVRequest& request)
@@ -858,6 +957,24 @@ static ReturnCode WriteTmdForDiVerify(FS::FileSystem* fs, const ES::TMDReader& t
 
 ReturnCode ESDevice::DIVerify(const ES::TMDReader& tmd, const ES::TicketReader& ticket)
 {
+  // d2x after it restarted itself for a disc game's IOS reload (RIFTWII-D2X.md
+  // step 3): the same game reports the IOS its TMD asks for, so it doesn't stop on
+  // error 002; any other title ends the block.
+  if (GetEmulationKernel().IsD2x() && s_d2x.fake_launch != 0 && s_d2x.game_title_id != 0)
+  {
+    if (tmd.IsValid() && tmd.GetTitleId() == s_d2x.game_title_id)
+    {
+      const u32 version = (static_cast<u32>(tmd.GetIOSId()) << 16) | 0xffff;
+      GetSystem().GetMemory().Write_U32(version, 0x3140);
+      NOTICE_LOG_FMT(IOS_ES, "d2x: {:016x} sees IOS version {:08x}", s_d2x.game_title_id, version);
+    }
+    else if (tmd.IsValid())
+    {
+      s_d2x.fake_launch = 0;
+    }
+    s_d2x.game_title_id = 0;
+  }
+
   m_core.m_title_context.Clear();
   INFO_LOG_FMT(IOS_ES, "ES_DIVerify: Title context changed: (none)");
 

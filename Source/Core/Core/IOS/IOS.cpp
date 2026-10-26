@@ -361,6 +361,11 @@ static std::optional<D2xSlot> FindD2xSlot(FS::FileSystem& fs, u64 ios_title_id)
   return D2xSlot{base, Common::swap16(&tmd[TMD_VERSION])};
 }
 
+bool HasD2xSlot(FS::FileSystem& fs, u64 ios_title_id)
+{
+  return FindD2xSlot(fs, ios_title_id).has_value();
+}
+
 EmulationKernel::EmulationKernel(Core::System& system, u64 title_id)
     : Kernel(title_id), m_system(system)
 {

@@ -117,6 +117,10 @@ void RAMOverrideForIOSMemoryValues(Memory::MemoryManager& memory, MemorySetupTyp
 
 void WriteReturnValue(Memory::MemoryManager& memory, s32 value, u32 address);
 
+// RiftWii's tests (RIFTWII-D2X.md): whether this IOS title is a cIOS slot whose
+// first content starts with d2x's version block, so it boots as d2x.
+bool HasD2xSlot(FS::FileSystem& fs, u64 ios_title_id);
+
 // HLE for the IOS kernel: IPC, device management, syscalls, and Dolphin-specific, IOS-wide calls.
 class Kernel
 {

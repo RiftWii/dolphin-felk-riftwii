@@ -322,6 +322,10 @@ private:
     IOCTL_ES_GET_TICKET_SIZE_FROM_VIEW = 0x43,
     IOCTL_ES_GET_TICKET_FROM_VIEW = 0x44,
     IOCTL_ES_CHECKKOREAREGION = 0x45,
+    // d2x's own requests (RiftWii's tests, RIFTWII-D2X.md step 3): answered only
+    // while a d2x slot runs.
+    IOCTL_ES_D2X_SET_FAKE_IOS_LAUNCH = 0xA0,
+    IOCTL_ES_D2X_SET_FAKE_SM_LAUNCH = 0xA1,
   };
 
   // ES can only have 3 contexts at one time.
@@ -365,6 +369,9 @@ private:
   std::optional<IPCReply> Launch(const IOCtlVRequest& request);
   std::optional<IPCReply> LaunchBC(const IOCtlVRequest& request);
   IPCReply DIVerify(const IOCtlVRequest& request);
+  IPCReply D2xSetFakeIosLaunch(const IOCtlVRequest& request);
+  IPCReply D2xSetFakeSystemMenuLaunch(const IOCtlVRequest& request);
+  u64 D2xLaunchTarget(u64 title_id);
   IPCReply SetUpStreamKey(const Context& context, const IOCtlVRequest& request);
   IPCReply DeleteStreamKey(const IOCtlVRequest& request);
 
