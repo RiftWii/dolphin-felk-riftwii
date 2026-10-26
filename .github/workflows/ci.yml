@@ -1,8 +1,9 @@
 name: CI
 
 on:
+  # Other branches run through their pull request, so a push to a PR's branch doesn't run everything twice
   push:
-    branches: [master, es-identify, d2x-emulation]
+    branches: [master]
     paths-ignore: ['**.md', 'docs/**']
   pull_request:
     paths-ignore: ['**.md', 'docs/**']
