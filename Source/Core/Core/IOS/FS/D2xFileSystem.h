@@ -25,6 +25,8 @@ public:
   void Unmount();
   s32 SetMode(u32 mode, const std::string& path);
   bool IsEmulated(const std::string& path) const;
+  // The console's own NAND, which this wraps.
+  std::shared_ptr<FileSystem> GetRealFS() const { return m_real_fs; }
 
   void DoState(PointerWrap& p) override;
   ResultCode Format(Uid uid) override;

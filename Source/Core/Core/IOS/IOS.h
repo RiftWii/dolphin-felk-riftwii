@@ -133,6 +133,8 @@ public:
   // They are also the only available resource managers even before loading any module.
   std::shared_ptr<FS::FileSystem> GetFS();
   std::shared_ptr<FS::D2xFileSystem> GetD2xFS() const { return m_d2x_fs; }
+  // The console's own NAND, without d2x's emulation (where IOS slots are).
+  std::shared_ptr<FS::FileSystem> GetRealNandFS();
   FSCore& GetFSCore();
   ESCore& GetESCore();
 

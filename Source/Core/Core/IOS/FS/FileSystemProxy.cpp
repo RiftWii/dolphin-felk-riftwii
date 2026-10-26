@@ -278,6 +278,10 @@ u64 FSCore::EstimateTicksForReadWrite(const Handle& handle, u64 fd, IPCCommandTy
 
   const bool is_write = command == IPC_CMD_WRITE;
   const Result<FileStatus> status = m_ios.GetFS()->GetFileStatus(handle.fs_fd);
+  // d2x's emulated files can fail here (no SD card, the image gone); the read
+  // or write that follows reports that error.
+  if (!status)
+    return 0;
   u32 offset = status->offset;
   u32 count = size;
   if (!is_write && count + offset > status->size)

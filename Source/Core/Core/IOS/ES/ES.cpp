@@ -812,7 +812,7 @@ std::optional<IPCReply> ESDevice::Launch(const IOCtlVRequest& request)
 // sees the slot as installed and can reload into it, as on a Wii.
 bool ESDevice::IsEmulatedOrD2xSlot(u64 title_id)
 {
-  return IsEmulated(title_id) || HasD2xSlot(*GetEmulationKernel().GetFS(), title_id);
+  return IsEmulated(title_id) || HasD2xSlot(*GetEmulationKernel().GetRealNandFS(), title_id);
 }
 
 // d2x's ioctlv 0xA0: a mode, and the slot to restart (249 without one). Refused

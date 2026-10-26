@@ -51,8 +51,8 @@ fs_tools.c` (`FS_CheckRealPath`, path building), `source/ffs-plugin/fat.h`
 (`FAT_MAXPATH 256`).
 
 - Vectors: in-vector[0] = u32 mode (missing/empty -> `IPC_ENOENT`, -6);
-  in-vector[1] = path if present, else `""` (a>setmode with one vector only
-  exists as ioctl 100, which passes `""`). A non-v ioctl 100 also exists and
+  in-vector[1] = path if present, else `""` (a set-mode call with one
+  argument also exists as ioctl 100, which passes `""`). A non-v ioctl 100 also exists and
   needs `inlen >= 4`.
 - Modes (`plugin.h`): `MODE_SDHC 0x01`, `MODE_USB 0x02`, `MODE_REV17 0x80`,
   `MODE_FULL 0x100`. RiftWii uses 1 (SD, game paths), 0x101 (SD, whole NAND),
@@ -114,8 +114,8 @@ emulating, RiftWii touches neither libfat nor the card.
   is switched on in an IOS session (`FAT_Init` returns early once the module
   is open); a later ioctlv 100 with another folder changes only the FFS
   plugin's copy. RiftWii switches it on once per launch.
-- Deliberately not implemented: the redirect itself (see 3), ioctlv 101,
-  ioctl 100, USB modes, and d2x's `"$"` relative opens.
+- Not implemented: ioctlv 101, ioctl 100, USB modes, and d2x's `"$"`
+  relative opens. The redirect itself is in section 3.
 
 ## 3. Redirect design
 
@@ -171,8 +171,10 @@ is linkable with custom disk callbacks (`Common/FatFsUtil.h`,
 ## 4. Gaps / follow-ups
 
 - No ioctlv 101 (`GETMODE`), no ioctl 100, no `"$"` relative opens, no USB.
-- Savestate stores mode/path and the fat mounted flag; restoring into a
-  running session is untested.
+- Savestates store the mode, folder, the fat module's state and the open
+  emulated files; `SavestateRestoresRoutingAndHandleOffsets` tests the
+  routing and file offsets, but loading a state in a running game is
+  untested.
 - Real-hardware check still needed: 0xF0/0xF1 and setmode answers against
   RiftWii logs (`boot.log`/`autorun.log`, `docs/WIIWARE.md` games).
 
@@ -188,4 +190,8 @@ is linkable with custom disk callbacks (`Common/FatFsUtil.h`,
   handler, savestate)
 - `Source/Core/Core/CMakeLists.txt` (new files)
 - `Source/Core/DolphinLib.props` (new files, MSBuild)
+- `Source/Core/Core/IOS/FS/D2xFileSystem.{h,cpp}` (new: the redirect)
+- `Source/Core/Core/IOS/SDIO/SDIOSlot0.{h,cpp}` (card image flush, no
+  buffering while d2x runs)
+- `Source/UnitTests/Core/IOS/FS/D2xFileSystemTest.cpp` (new: 8 tests)
 - `RIFTWII-D2X-NAND.md` (this file)

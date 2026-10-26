@@ -365,6 +365,11 @@ static std::optional<D2xSlot> FindD2xSlot(FS::FileSystem& fs, u64 ios_title_id)
   return D2xSlot{base, Common::swap16(&tmd[TMD_VERSION])};
 }
 
+std::shared_ptr<FS::FileSystem> Kernel::GetRealNandFS()
+{
+  return m_d2x_fs ? m_d2x_fs->GetRealFS() : m_fs;
+}
+
 bool HasD2xSlot(FS::FileSystem& fs, u64 ios_title_id)
 {
   return FindD2xSlot(fs, ios_title_id).has_value();
