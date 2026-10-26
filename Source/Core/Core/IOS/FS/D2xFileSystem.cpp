@@ -97,7 +97,8 @@ class CardCallbacks final : public Common::FatFsCallbacks
 public:
   explicit CardCallbacks(u32 partition_offset)
       : image(File::GetUserPath(F_WIISDCARDIMAGE_IDX),
-              Config::Get(Config::MAIN_ALLOW_SD_WRITES) ? "r+b" : "rb"),
+              Config::Get(Config::MAIN_ALLOW_SD_WRITES) ? "r+b" : "rb",
+              File::SharedAccess::ReadWrite),
         m_partition_offset(partition_offset)
   {
   }

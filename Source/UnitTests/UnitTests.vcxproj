@@ -38,6 +38,7 @@
     <ClCompile Include="$(ExternalsDir)gtest\googletest\src\gtest-all.cc" />
     <!--Lump all of the tests (and supporting code) into one binary-->
     <ClCompile Include="UnitTestsMain.cpp" />
+    <ClCompile Include="Core\D2xBlobTest.cpp" />
     <ClCompile Include="Common\BitFieldTest.cpp" />
     <ClCompile Include="Common\BitSetTest.cpp" />
     <ClCompile Include="Common\BitUtilsTest.cpp" />

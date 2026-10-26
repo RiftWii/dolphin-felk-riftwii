@@ -425,6 +425,8 @@ add_library(core
   IOS/Network/WD/Command.h
   IOS/SDIO/SDIOSlot0.cpp
   IOS/SDIO/SDIOSlot0.h
+  IOS/SDIO/D2xSDHC.cpp
+  IOS/SDIO/D2xSDHC.h
   IOS/STM/STM.cpp
   IOS/STM/STM.h
   IOS/USB/Bluetooth/BTBase.cpp

@@ -24,6 +24,8 @@ enum class SharedAccess
 {
   Default,
   Read,
+  // Share with readers and writers; the open mode still controls this handle's access.
+  ReadWrite,
 };
 
 // simple wrapper for cstdlib file functions to

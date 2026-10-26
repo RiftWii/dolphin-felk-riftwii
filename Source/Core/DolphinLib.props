@@ -395,6 +395,7 @@
     <ClInclude Include="Core\IOS\Network\SSL.h" />
     <ClInclude Include="Core\IOS\Network\WD\Command.h" />
     <ClInclude Include="Core\IOS\SDIO\SDIOSlot0.h" />
+    <ClInclude Include="Core\IOS\SDIO\D2xSDHC.h" />
     <ClInclude Include="Core\IOS\STM\STM.h" />
     <ClInclude Include="Core\IOS\Uids.h" />
     <ClInclude Include="Core\IOS\USB\Bluetooth\BTBase.h" />
@@ -472,6 +473,7 @@
     <ClInclude Include="DiscIO\Blob.h" />
     <ClInclude Include="DiscIO\CISOBlob.h" />
     <ClInclude Include="DiscIO\CompressedBlob.h" />
+    <ClInclude Include="DiscIO\D2xBlob.h" />
     <ClInclude Include="DiscIO\DirectoryBlob.h" />
     <ClInclude Include="DiscIO\DiscExtractor.h" />
     <ClInclude Include="DiscIO\DiscScrubber.h" />
@@ -1069,6 +1071,7 @@
     <ClCompile Include="Core\IOS\Network\SSL.cpp" />
     <ClCompile Include="Core\IOS\Network\WD\Command.cpp" />
     <ClCompile Include="Core\IOS\SDIO\SDIOSlot0.cpp" />
+    <ClCompile Include="Core\IOS\SDIO\D2xSDHC.cpp" />
     <ClCompile Include="Core\IOS\STM\STM.cpp" />
     <ClCompile Include="Core\IOS\USB\Bluetooth\BTBase.cpp" />
     <ClCompile Include="Core\IOS\USB\Bluetooth\BTEmu.cpp" />
@@ -1145,6 +1148,7 @@
     <ClCompile Include="DiscIO\Blob.cpp" />
     <ClCompile Include="DiscIO\CISOBlob.cpp" />
     <ClCompile Include="DiscIO\CompressedBlob.cpp" />
+    <ClCompile Include="DiscIO\D2xBlob.cpp" />
     <ClCompile Include="DiscIO\DirectoryBlob.cpp" />
     <ClCompile Include="DiscIO\DiscExtractor.cpp" />
     <ClCompile Include="DiscIO\DiscScrubber.cpp" />

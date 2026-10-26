@@ -97,6 +97,9 @@ public:
     DVDLowRequestAudioStatus = 0xe2,
     DVDLowStopMotor = 0xe3,
     DVDLowAudioBufferConfig = 0xe4,
+    D2xDisableReset = 0xf6,
+    D2xSetFragments = 0xf9,
+    D2xGetMode = 0xfa,
   };
 
   enum class DIResult : s32
@@ -124,6 +127,7 @@ private:
 
   void ProcessQueuedIOCtl();
   std::optional<DIResult> StartIOCtl(const IOCtlRequest& request);
+  std::optional<DIResult> ConfigureD2xFragments(const IOCtlRequest& request);
   std::optional<DIResult> WriteIfFits(const IOCtlRequest& request, u32 value);
   std::optional<DIResult> StartDMATransfer(u32 command_length, const IOCtlRequest& request);
   std::optional<DIResult> StartImmediateTransfer(const IOCtlRequest& request,
@@ -144,5 +148,7 @@ private:
 
   bool m_has_initialized = false;
   u32 m_last_length = 0;
+  bool m_d2x_fragments = false;
+  bool m_d2x_disable_reset = false;
 };
 }  // namespace IOS::HLE

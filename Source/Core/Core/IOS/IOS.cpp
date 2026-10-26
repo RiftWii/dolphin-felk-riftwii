@@ -52,6 +52,7 @@
 #include "Core/IOS/Network/SSL.h"
 #include "Core/IOS/Network/Socket.h"
 #include "Core/IOS/Network/WD/Command.h"
+#include "Core/IOS/SDIO/D2xSDHC.h"
 #include "Core/IOS/SDIO/SDIOSlot0.h"
 #include "Core/IOS/STM/STM.h"
 #include "Core/IOS/USB/Bluetooth/BTEmu.h"
@@ -681,7 +682,10 @@ void EmulationKernel::AddStaticDevices()
   AddDevice(std::make_unique<DeviceStub>(*this, "/dev/sdio/slot1"));
 
   if (IsD2x())
+  {
     AddDevice(std::make_unique<FatDevice>(*this, "fat"));
+    AddDevice(std::make_unique<D2xSDHCDevice>(*this, "/dev/sdio/sdhc"));
+  }
 
   // Network modules
   if (HasFeature(features, Feature::KD) || HasFeature(features, Feature::SO) ||
