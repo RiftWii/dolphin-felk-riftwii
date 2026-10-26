@@ -117,7 +117,18 @@ emulating, RiftWii touches neither libfat nor the card.
 - Deliberately not implemented: the redirect itself (see 3), ioctlv 101,
   ioctl 100, USB modes, and d2x's `"$"` relative opens.
 
-## 3. Redirect design (not implemented)
+## 3. Redirect design
+
+Option A is implemented in `Source/Core/Core/IOS/FS/D2xFileSystem.cpp`: a
+file system wrapper installed for a d2x kernel, so `/dev/fs` and ES both
+see the emulated paths. Every request flushes the SD device's handle,
+mounts the card image with FatFs, does its work and unmounts, so no
+cache outlives a request. Tested with RiftWii: Super Mario Bros. (NES VC)
+started from `sd:/nands/test` and wrote its save to the card, which was
+still there after Dolphin closed and synced the card back to its folder.
+Not done: USB, ioctlv 101, ioctl 100, d2x's per-game fixes.
+
+The options as they were weighed:
 
 Dolphin facts used: the SD card is a raw image (`WiiSD-<card>.raw`), rebuilt
 from the host sync folder at boot when folder sync is on and synced back on
