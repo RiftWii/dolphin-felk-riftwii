@@ -152,6 +152,7 @@ protected:
   bool m_is_responsible_for_nand_root = false;
   u64 m_title_id = 0;
   u32 m_d2x_base = 0;  // the base IOS of a d2x slot; 0 when not d2x
+  u16 m_d2x_revision = 0;  // d2x's revision (the slot's TMD version)
 
   IOSC m_iosc;
   std::shared_ptr<FS::FileSystem> m_fs;
@@ -192,6 +193,7 @@ public:
   u16 GetGidForPPC() const;
 
   bool BootstrapPPC(const std::string& boot_content_path);
+  bool SetupMemoryForThisIOS(MemorySetupType setup_type);
   bool BootIOS(u64 ios_title_id, HangPPC hang_ppc = HangPPC::No,
                const std::string& boot_content_path = {});
   void InitIPC();

@@ -386,11 +386,10 @@ EmulationKernel::EmulationKernel(Core::System& system, u64 title_id)
     NOTICE_LOG_FMT(IOS, "IOS{} is d2x on base IOS{}, revision {}", static_cast<u32>(title_id),
                    d2x->base, d2x->revision);
   }
-  auto& memory = m_system.GetMemory();
-  if (!SetupMemory(memory, d2x ? Titles::IOS(d2x->base) : title_id, MemorySetupType::IOSReload))
+  if (d2x)
+    m_d2x_revision = d2x->revision;
+  if (!SetupMemoryForThisIOS(MemorySetupType::IOSReload))
     WARN_LOG_FMT(IOS, "No information about this IOS -- cannot set up memory values");
-  else if (d2x)
-    memory.Write_U32((static_cast<u32>(title_id) << 16) | d2x->revision, ADDR_IOS_VERSION);
 
   if (title_id == Titles::MIOS)
   {
@@ -498,6 +497,22 @@ static std::vector<u8> ReadBootContent(FSCore& fs, const std::string& path, size
 
 // This corresponds to syscall 0x41, which loads a binary from the NAND and bootstraps the PPC.
 // Unlike 0x42, IOS will set up some constants in memory before booting the PPC.
+// SetupMemory for the IOS this kernel runs. A d2x slot is not in the memory
+// values table: it uses its base IOS's, and the PPC sees the slot and d2x's
+// revision at 0x3140, as on a Wii.
+bool EmulationKernel::SetupMemoryForThisIOS(MemorySetupType setup_type)
+{
+  auto& memory = m_system.GetMemory();
+  const u64 values_title = IsD2x() ? Titles::IOS(m_d2x_base) : m_title_id;
+  if (!SetupMemory(memory, values_title, setup_type))
+    return false;
+  if (IsD2x())
+  {
+    memory.Write_U32((static_cast<u32>(m_title_id) << 16) | m_d2x_revision, ADDR_IOS_VERSION);
+  }
+  return true;
+}
+
 bool EmulationKernel::BootstrapPPC(const std::string& boot_content_path)
 {
   // Seeking and processing overhead is ignored as most time is spent reading from the NAND.
@@ -508,7 +523,7 @@ bool EmulationKernel::BootstrapPPC(const std::string& boot_content_path)
   if (!dol.IsValid())
     return false;
 
-  if (!SetupMemory(m_system.GetMemory(), m_title_id, MemorySetupType::Full))
+  if (!SetupMemoryForThisIOS(MemorySetupType::Full))
     return false;
 
   // Reset the PPC and pause its execution until we're ready.
@@ -956,11 +971,13 @@ void EmulationKernel::DoState(PointerWrap& p)
   p.Do(m_ipc_paused);
   p.Do(m_title_id);
   p.Do(m_d2x_base);
+  p.Do(m_d2x_revision);
   p.Do(m_ppc_uid);
   p.Do(m_ppc_gid);
 
   m_iosc.DoState(p);
-  m_fs->DoState(p);
+  if (m_fs)
+    m_fs->DoState(p);
 
   if (m_title_id == Titles::MIOS)
     return;
