@@ -185,6 +185,9 @@ public:
                              const ES::CertReader& certificate, const std::vector<u8>& cert_chain,
                              u32 certificate_iosc_handle);
 
+  // Whether a title runs (ES_Launch of a title, ES_Identify or a disc's DIVerify).
+  bool IsTitleRunning() const { return m_title_context.active; }
+
 private:
   // Start a title import.
   bool InitImport(const ES::TMDReader& tmd);

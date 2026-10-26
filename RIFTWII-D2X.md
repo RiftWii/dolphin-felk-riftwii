@@ -16,7 +16,7 @@ of what already works here, instead of the first test.
 | Step | What | d2x's interface | Status |
 | --- | --- | --- | --- |
 | 1 | A d2x cIOS in a slot (249, 250...) | The slot's IOS title, and d2x's version block in its NAND content, which RiftWii reads to recognise d2x | Works: RiftWii finds the slot, lists it as installed, reloads into it (Dolphin logs "IOS249 is d2x on base IOS56") |
-| 2 | NAND emulation from the SD card: emulated NANDs, game saves on the card | `/dev/fs` ioctlv 100 sets the mode and the folder; the `fat` module mounts and unmounts the card (ioctlv 0xF0 / 0xF1) | To do |
+| 2 | NAND emulation from the SD card: emulated NANDs, game saves on the card | `/dev/fs` ioctlv 100 sets the mode and the folder; the `fat` module mounts and unmounts the card (ioctlv 0xF0 / 0xF1) | Commands answered (RiftWii: "NAND emulation on: mode 0x101, path /nands/test"); the redirect itself is next, see RIFTWII-D2X-NAND.md |
 | 3 | Keeping the cIOS across a game's IOS reload; going back to RiftWii | ES ioctlv 0xA0 (reload block) and 0xA1 (return to) | Coded; RiftWii's 0xA0 calls are answered. A game's reload still to test |
 | 4 | Game images on the SD card or a USB drive | The disc drive's fragment lists, USB storage, `/dev/sdio/sdhc` | Later, if worth it. An SD launch now stops at `/dev/di` ioctls 0xFA, 0xF9 and 0xF6, unknown to Dolphin |
 

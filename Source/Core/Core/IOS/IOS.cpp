@@ -40,6 +40,7 @@
 #include "Core/IOS/DeviceStub.h"
 #include "Core/IOS/DolphinDevice.h"
 #include "Core/IOS/ES/ES.h"
+#include "Core/IOS/Fat/Fat.h"
 #include "Core/IOS/FS/FileSystem.h"
 #include "Core/IOS/FS/FileSystemProxy.h"
 #include "Core/IOS/MIOS.h"
@@ -644,6 +645,9 @@ void EmulationKernel::AddStaticDevices()
   AddDevice(std::make_unique<SDIOSlot0Device>(*this, "/dev/sdio/slot0"));
   AddDevice(std::make_unique<DeviceStub>(*this, "/dev/sdio/slot1"));
 
+  if (IsD2x())
+    AddDevice(std::make_unique<FatDevice>(*this, "fat"));
+
   // Network modules
   if (HasFeature(features, Feature::KD) || HasFeature(features, Feature::SO) ||
       HasFeature(features, Feature::SSL))
@@ -762,6 +766,10 @@ std::optional<IPCReply> EmulationKernel::OpenDevice(OpenRequest& request)
   else if (request.path.starts_with('/'))
   {
     device = GetDeviceByName("/dev/fs");
+  }
+  else if (request.path == "fat")
+  {
+    device = GetDeviceByName("fat");
   }
 
   if (!device)

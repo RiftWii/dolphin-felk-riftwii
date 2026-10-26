@@ -110,6 +110,12 @@ private:
   u64 m_next_fd = 0x18;
   std::map<u64, Handle> m_fd_map;
 
+  // d2x's NAND emulation (RIFTWII-D2X.md step 2): the mode and card folder from
+  // /dev/fs ioctlv 100. Cleared on mode 0 and on every IOS restart, as in d2x.
+  static constexpr size_t D2X_NAND_PATH_BYTES = 256;
+  u32 m_d2x_mode = 0;
+  std::array<char, D2X_NAND_PATH_BYTES> m_d2x_nand_path{};
+
   friend class FSDevice;
 };
 
@@ -145,6 +151,7 @@ private:
     ISFS_IOCTL_GETFILESTATS = 11,
     ISFS_IOCTLV_GETUSAGE = 12,
     ISFS_IOCTL_SHUTDOWN = 13,
+    ISFS_IOCTLV_SETMODE_D2X = 100,
   };
 
   using Handle = FSCore::Handle;
@@ -162,6 +169,7 @@ private:
   IPCReply GetFileStats(const Handle& handle, const IOCtlRequest& request);
   IPCReply GetUsage(const Handle& handle, const IOCtlVRequest& request);
   IPCReply Shutdown(const Handle& handle, const IOCtlRequest& request);
+  IPCReply D2xSetMode(const IOCtlVRequest& request);
 
   FSCore& m_core;
 };

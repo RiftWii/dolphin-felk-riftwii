@@ -369,6 +369,7 @@
     <ClInclude Include="Core\IOS\DolphinDevice.h" />
     <ClInclude Include="Core\IOS\ES\ES.h" />
     <ClInclude Include="Core\IOS\ES\Formats.h" />
+    <ClInclude Include="Core\IOS\Fat\Fat.h" />
     <ClInclude Include="Core\IOS\FS\FileSystem.h" />
     <ClInclude Include="Core\IOS\FS\FileSystemProxy.h" />
     <ClInclude Include="Core\IOS\FS\HostBackend\FS.h" />
@@ -1042,6 +1043,7 @@
     <ClCompile Include="Core\IOS\ES\TitleInformation.cpp" />
     <ClCompile Include="Core\IOS\ES\TitleManagement.cpp" />
     <ClCompile Include="Core\IOS\ES\Views.cpp" />
+    <ClCompile Include="Core\IOS\Fat\Fat.cpp" />
     <ClCompile Include="Core\IOS\FS\FileSystemCommon.cpp" />
     <ClCompile Include="Core\IOS\FS\FileSystemProxy.cpp" />
     <ClCompile Include="Core\IOS\FS\HostBackend\File.cpp" />

@@ -15,6 +15,7 @@
 #include "Common/Swap.h"
 #include "Core/HW/Memmap.h"
 #include "Core/HW/SystemTimers.h"
+#include "Core/IOS/ES/ES.h"
 #include "Core/IOS/FS/FileSystem.h"
 #include "Core/IOS/Uids.h"
 #include "Core/System.h"
@@ -110,6 +111,8 @@ void FSDevice::DoState(PointerWrap& p)
   p.Do(m_core.m_cache_fd);
   p.Do(m_core.m_next_fd);
   p.Do(m_core.m_fd_map);
+  p.Do(m_core.m_d2x_mode);
+  p.Do(m_core.m_d2x_nand_path);
 }
 
 template <typename... Args>
@@ -491,6 +494,10 @@ std::optional<IPCReply> FSDevice::IOCtlV(const IOCtlVRequest& request)
     return ReadDirectory(it->second, request);
   case ISFS_IOCTLV_GETUSAGE:
     return GetUsage(it->second, request);
+  case ISFS_IOCTLV_SETMODE_D2X:
+    if (GetEmulationKernel().IsD2x())
+      return D2xSetMode(request);
+    return GetFSReply(ConvertResult(ResultCode::Invalid));
   default:
     return GetFSReply(ConvertResult(ResultCode::Invalid));
   }
@@ -780,6 +787,48 @@ IPCReply FSDevice::GetUsage(const Handle& handle, const IOCtlVRequest& request)
 IPCReply FSDevice::Shutdown(const Handle& handle, const IOCtlRequest& request)
 {
   INFO_LOG_FMT(IOS_FS, "Shutdown");
+  return GetFSReply(IPC_SUCCESS);
+}
+
+IPCReply FSDevice::D2xSetMode(const IOCtlVRequest& request)
+{
+  constexpr u32 D2X_MODE_SD = 0x01;
+  constexpr u32 D2X_MODE_USB = 0x02;
+  constexpr u32 D2X_MODE_REV17 = 0x80;
+
+  auto& system = GetSystem();
+  auto& memory = system.GetMemory();
+
+  if (request.in_vectors.empty() || request.in_vectors[0].size < sizeof(u32))
+  {
+    INFO_LOG_FMT(IOS, "/dev/fs: d2x set NAND emulation mode refused: bad vectors");
+    return GetFSReply(IPC_ENOENT);
+  }
+
+  const u32 mode = memory.Read_U32(request.in_vectors[0].address);
+  std::string path;
+  if (request.in_vectors.size() > 1)
+    path = memory.GetString(request.in_vectors[1].address, request.in_vectors[1].size);
+
+  if (GetEmulationKernel().GetESCore().IsTitleRunning())
+  {
+    INFO_LOG_FMT(IOS, "/dev/fs: d2x NAND emulation mode {:#x} refused: a title is running", mode);
+    return GetFSReply(IPC_ENOENT);
+  }
+
+  if ((mode & (D2X_MODE_SD | D2X_MODE_USB)) == 0)
+  {
+    m_core.m_d2x_mode = 0;
+    m_core.m_d2x_nand_path.fill(0);
+    INFO_LOG_FMT(IOS, "/dev/fs: d2x NAND emulation off (mode {:#x})", mode);
+    return GetFSReply(IPC_SUCCESS);
+  }
+
+  m_core.m_d2x_mode = mode | D2X_MODE_REV17;
+  m_core.m_d2x_nand_path.fill(0);
+  const size_t copy_len = std::min(path.size(), m_core.m_d2x_nand_path.size() - 1);
+  std::copy_n(path.data(), copy_len, m_core.m_d2x_nand_path.data());
+  INFO_LOG_FMT(IOS, "/dev/fs: d2x NAND emulation on: mode {:#x}, path \"{}\"", mode, path);
   return GetFSReply(IPC_SUCCESS);
 }
 }  // namespace IOS::HLE
