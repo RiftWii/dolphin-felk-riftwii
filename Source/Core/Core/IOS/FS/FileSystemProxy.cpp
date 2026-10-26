@@ -16,6 +16,7 @@
 #include "Core/HW/Memmap.h"
 #include "Core/HW/SystemTimers.h"
 #include "Core/IOS/ES/ES.h"
+#include "Core/IOS/FS/D2xFileSystem.h"
 #include "Core/IOS/FS/FileSystem.h"
 #include "Core/IOS/Uids.h"
 #include "Core/System.h"
@@ -818,10 +819,19 @@ IPCReply FSDevice::D2xSetMode(const IOCtlVRequest& request)
 
   if ((mode & (D2X_MODE_SD | D2X_MODE_USB)) == 0)
   {
+    GetEmulationKernel().GetD2xFS()->SetMode(0, "");
     m_core.m_d2x_mode = 0;
     m_core.m_d2x_nand_path.fill(0);
     INFO_LOG_FMT(IOS, "/dev/fs: d2x NAND emulation off (mode {:#x})", mode);
     return GetFSReply(IPC_SUCCESS);
+  }
+
+  path.resize(std::min(path.size(), m_core.m_d2x_nand_path.size() - 1));
+  const s32 result = GetEmulationKernel().GetD2xFS()->SetMode(mode, path);
+  if (result < 0)
+  {
+    WARN_LOG_FMT(IOS_FS, "d2x SetMode({:#x}, {}): IOS {}", mode, path, result);
+    return GetFSReply(result);
   }
 
   m_core.m_d2x_mode = mode | D2X_MODE_REV17;

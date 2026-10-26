@@ -104,6 +104,15 @@ void SDIOSlot0Device::OpenInternal()
                             "from a read-only directory?");
     }
   }
+  // d2x uses another host handle for FatFs requests. Disable read-ahead and
+  // deferred writes here so sector access observes those requests immediately.
+  if (m_card.IsOpen() && GetEmulationKernel().IsD2x())
+    std::setvbuf(m_card.GetHandle(), nullptr, _IONBF, 0);
+}
+
+bool SDIOSlot0Device::FlushCardImage()
+{
+  return !m_card.IsOpen() || m_card.Flush();
 }
 
 std::optional<IPCReply> SDIOSlot0Device::Open(const OpenRequest& request)

@@ -7,6 +7,9 @@
 #include "Common/EnumUtils.h"
 #include "Common/Logging/Log.h"
 #include "Core/Config/MainSettings.h"
+#include "Core/HW/Memmap.h"
+#include "Core/IOS/FS/D2xFileSystem.h"
+#include "Core/System.h"
 
 namespace IOS::HLE
 {
@@ -48,8 +51,12 @@ std::optional<IPCReply> FatDevice::IOCtlV(const IOCtlVRequest& request)
       return IPCReply(IPC_EINVAL);
     }
     m_card_started = true;
-    INFO_LOG_FMT(IOS, "fat: mounted SD card");
-    return IPCReply(IPC_SUCCESS);
+    s32 partition = -1;
+    if (!request.in_vectors.empty() && request.in_vectors[0].size >= sizeof(u32))
+      partition = GetSystem().GetMemory().Read_U32(request.in_vectors[0].address);
+    const s32 result = GetEmulationKernel().GetD2xFS()->Mount(partition);
+    INFO_LOG_FMT(IOS, "fat: mount SD card, partition {}: {}", partition, result);
+    return IPCReply(result);
   }
   case IOCTLV_FAT_UNMOUNT_SD:
   {
@@ -61,6 +68,7 @@ std::optional<IPCReply> FatDevice::IOCtlV(const IOCtlVRequest& request)
       return IPCReply(IPC_EINVAL);
     }
     m_card_started = false;
+    GetEmulationKernel().GetD2xFS()->Unmount();
     INFO_LOG_FMT(IOS, "fat: unmounted SD card");
     return IPCReply(1);
   }

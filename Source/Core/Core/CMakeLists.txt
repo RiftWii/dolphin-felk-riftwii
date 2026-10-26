@@ -376,6 +376,8 @@ add_library(core
   IOS/ES/Views.cpp
   IOS/Fat/Fat.cpp
   IOS/Fat/Fat.h
+  IOS/FS/D2xFileSystem.cpp
+  IOS/FS/D2xFileSystem.h
   IOS/FS/FileSystem.h
   IOS/FS/FileSystemCommon.cpp
   IOS/FS/FileSystemProxy.cpp

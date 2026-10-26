@@ -26,6 +26,7 @@ public:
   ~SDIOSlot0Device() override;
 
   void DoState(PointerWrap& p) override;
+  bool FlushCardImage();
 
   std::optional<IPCReply> Open(const OpenRequest& request) override;
   std::optional<IPCReply> Close(u32 fd) override;

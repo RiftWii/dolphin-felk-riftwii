@@ -13,11 +13,11 @@
 #include <string>
 #include <utility>
 
+#include <fmt/format.h>
 #include "Common/Assert.h"
 #include "Common/ChunkFile.h"
 #include "Common/CommonTypes.h"
 #include "Common/EnumUtils.h"
-#include <fmt/format.h>
 
 #include "Common/Logging/Log.h"
 #include "Common/Swap.h"
@@ -40,9 +40,10 @@
 #include "Core/IOS/DeviceStub.h"
 #include "Core/IOS/DolphinDevice.h"
 #include "Core/IOS/ES/ES.h"
-#include "Core/IOS/Fat/Fat.h"
+#include "Core/IOS/FS/D2xFileSystem.h"
 #include "Core/IOS/FS/FileSystem.h"
 #include "Core/IOS/FS/FileSystemProxy.h"
+#include "Core/IOS/Fat/Fat.h"
 #include "Core/IOS/MIOS.h"
 #include "Core/IOS/Network/IP/Top.h"
 #include "Core/IOS/Network/KD/NetKDRequest.h"
@@ -334,14 +335,16 @@ static std::optional<D2xSlot> FindD2xSlot(FS::FileSystem& fs, u64 ios_title_id)
 
   const std::string content_dir = fmt::format("/title/00000001/{:08x}/content", slot);
   std::array<u8, TMD_FIRST_CONTENT + 4> tmd{};
-  const auto tmd_file = fs.OpenFile(PID_KERNEL, PID_KERNEL, content_dir + "/title.tmd", FS::Mode::Read);
+  const auto tmd_file =
+      fs.OpenFile(PID_KERNEL, PID_KERNEL, content_dir + "/title.tmd", FS::Mode::Read);
   if (!tmd_file || !tmd_file->Read(tmd.data(), tmd.size()))
     return std::nullopt;
 
   const u32 content_id = Common::swap32(&tmd[TMD_FIRST_CONTENT]);
   std::array<u8, 0x40> block{};
-  const auto content = fs.OpenFile(PID_KERNEL, PID_KERNEL,
-                                   fmt::format("{}/{:08x}.app", content_dir, content_id), FS::Mode::Read);
+  const auto content =
+      fs.OpenFile(PID_KERNEL, PID_KERNEL, fmt::format("{}/{:08x}.app", content_dir, content_id),
+                  FS::Mode::Read);
   if (!content || !content->Read(block.data(), block.size()))
     return std::nullopt;
 
@@ -355,8 +358,8 @@ static std::optional<D2xSlot> FindD2xSlot(FS::FileSystem& fs, u64 ios_title_id)
 
   const u32 base = block[0x0f];
   const auto& values = GetMemoryValues();
-  const bool known_base = std::any_of(values.begin(), values.end(),
-                                      [base](const MemoryValues& v) { return v.ios_number == base; });
+  const bool known_base = std::any_of(
+      values.begin(), values.end(), [base](const MemoryValues& v) { return v.ios_number == base; });
   if (!known_base)
     return std::nullopt;
   return D2xSlot{base, Common::swap16(&tmd[TMD_VERSION])};
@@ -383,6 +386,18 @@ EmulationKernel::EmulationKernel(Core::System& system, u64 title_id)
   if (d2x)
   {
     m_d2x_base = d2x->base;
+    m_d2x_fs = std::make_shared<FS::D2xFileSystem>(
+        m_fs,
+        [this] {
+          const auto device = GetDeviceByName("/dev/sdio/slot0");
+          return !device || std::static_pointer_cast<SDIOSlot0Device>(device)->FlushCardImage();
+        },
+        [this] { return m_system.GetMemory().Read_U16(4); },
+        [this] {
+          const u8 system_code = m_system.GetMemory().Read_U8(0);
+          return system_code == 'R' || system_code == 'S';
+        });
+    m_fs = m_d2x_fs;
     NOTICE_LOG_FMT(IOS, "IOS{} is d2x on base IOS{}, revision {}", static_cast<u32>(title_id),
                    d2x->base, d2x->revision);
   }

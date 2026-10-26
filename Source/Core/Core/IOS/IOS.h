@@ -33,7 +33,8 @@ namespace IOS::HLE
 namespace FS
 {
 class FileSystem;
-}
+class D2xFileSystem;
+}  // namespace FS
 
 class Device;
 class ESCore;
@@ -131,6 +132,7 @@ public:
   // These are *always* part of the IOS kernel and always available.
   // They are also the only available resource managers even before loading any module.
   std::shared_ptr<FS::FileSystem> GetFS();
+  std::shared_ptr<FS::D2xFileSystem> GetD2xFS() const { return m_d2x_fs; }
   FSCore& GetFSCore();
   ESCore& GetESCore();
 
@@ -156,6 +158,7 @@ protected:
 
   IOSC m_iosc;
   std::shared_ptr<FS::FileSystem> m_fs;
+  std::shared_ptr<FS::D2xFileSystem> m_d2x_fs;
   std::shared_ptr<WiiSockMan> m_socket_manager;
 };
 
