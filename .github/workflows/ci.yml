@@ -2,7 +2,10 @@ name: CI
 
 on:
   push:
+    branches: [master, es-identify, d2x-emulation]
+    paths-ignore: ['**.md', 'docs/**']
   pull_request:
+    paths-ignore: ['**.md', 'docs/**']
   workflow_dispatch:
 
 permissions:
@@ -15,8 +18,6 @@ concurrency:
 jobs:
   linux:
     runs-on: ubuntu-24.04
-    # A pull request from a branch in this repo already runs on push
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
     timeout-minutes: 120
     env:
       CCACHE_DIR: ${{ github.workspace }}/.ccache
@@ -38,7 +39,7 @@ jobs:
             libswresample-dev libusb-1.0-0-dev python3-dev pkg-config
 
       - name: Restore ccache
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: ${{ github.workspace }}/.ccache
           key: linux-ccache-${{ github.sha }}
@@ -48,7 +49,7 @@ jobs:
       - name: Configure ccache
         run: |
           mkdir -p "$CCACHE_DIR"
-          ccache --max-size=2G
+          ccache --max-size=1G
           ccache --set-config=compiler_check=content
           ccache --zero-stats
 
@@ -63,16 +64,25 @@ jobs:
       - name: Build
         run: cmake --build build --parallel
 
-      - name: Build and run unit tests
-        run: cmake --build build --target unittests --parallel
+      - name: Build unit tests
+        run: cmake --build build --target tests --parallel
+
+      - name: Run unit tests
+        run: ctest --test-dir build --output-on-failure
 
       - name: Show ccache stats
         run: ccache --show-stats
 
+      # Only pushes save the cache, so pull requests don't fill the repo's 10 GB
+      - name: Save ccache
+        if: github.event_name == 'push'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ github.workspace }}/.ccache
+          key: linux-ccache-${{ github.sha }}
+
   macos:
     runs-on: macos-15
-    # A pull request from a branch in this repo already runs on push
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
     timeout-minutes: 120
     env:
       CCACHE_DIR: ${{ github.workspace }}/.ccache
@@ -83,11 +93,10 @@ jobs:
 
       - name: Install dependencies
         run: |
-          brew update
           brew install qt python@3.12 ninja ccache
 
       - name: Restore ccache
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: ${{ github.workspace }}/.ccache
           key: macos-ccache-${{ github.sha }}
@@ -97,7 +106,7 @@ jobs:
       - name: Configure ccache
         run: |
           mkdir -p "$CCACHE_DIR"
-          ccache --max-size=2G
+          ccache --max-size=1G
           ccache --set-config=compiler_check=content
           ccache --zero-stats
 
@@ -117,11 +126,22 @@ jobs:
       - name: Build
         run: cmake --build build --parallel
 
-      - name: Build and run unit tests
-        run: cmake --build build --target unittests --parallel
+      - name: Build unit tests
+        run: cmake --build build --target tests --parallel
+
+      - name: Run unit tests
+        run: ctest --test-dir build --output-on-failure
 
       - name: Show ccache stats
         run: ccache --show-stats
+
+      # Only pushes save the cache, so pull requests don't fill the repo's 10 GB
+      - name: Save ccache
+        if: github.event_name == 'push'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ github.workspace }}/.ccache
+          key: macos-ccache-${{ github.sha }}
 
       - name: Package app
         run: |
@@ -139,8 +159,6 @@ jobs:
 
   windows:
     runs-on: windows-2022
-    # A pull request from a branch in this repo already runs on push
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
     timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
@@ -157,6 +175,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: dolphin-windows
-          path: Binary/x64
+          path: |
+            Binary/x64
+            !Binary/x64/Tests
+            !Binary/x64/**/*.pdb
           if-no-files-found: error
           retention-days: 14
