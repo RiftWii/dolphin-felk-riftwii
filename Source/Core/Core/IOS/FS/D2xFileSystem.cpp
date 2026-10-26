@@ -404,7 +404,9 @@ s32 D2xFileSystem::SetMode(u32 mode, const std::string& path)
   m_mode = mode | 0x80;
   m_nand_path = path;
   INFO_LOG_FMT(IOS_FS, "d2x NAND redirect started: mode {:#x}, folder \"{}\"", m_mode, m_nand_path);
-  // __FS_PrepareFolders bypasses the partial-mode routing rules.
+  // __FS_PrepareFolders bypasses the partial-mode routing rules. d2x's own
+  // version returns nothing: a folder it can't make or clear doesn't fail the
+  // mode switch, and the request that later needs it reports the error.
   Run("PrepareFolders", path, [&] {
     constexpr std::array folders{
         "/import",          "/sys",           "/ticket",         "/ticket/00010001",

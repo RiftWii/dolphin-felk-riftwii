@@ -129,8 +129,8 @@ still there after Dolphin closed and synced the card back to its folder.
 USB (added after this step): the fat module's 0xF2/0xF3 mount the USB
 drive and NAND mode 2 emulates the NAND from it, on the disk image set
 with `Dolphin.General.WiiUSBPath` (see RIFTWII-D2X.md, step 4). The
-emulated NAND uses the drive its mode names, whichever drive was mounted
-last. Not done: ioctlv 101, ioctl 100, d2x's per-game fixes.
+emulated NAND uses the drive its mode names, not the drive that was
+mounted last. Not done: ioctlv 101, ioctl 100, d2x's per-game fixes.
 
 The options as they were weighed:
 
