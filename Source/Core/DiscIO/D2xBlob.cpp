@@ -21,13 +21,15 @@ D2xBlobReader::D2xBlobReader(File::IOFile card, u64 card_size, u64 disc_size,
 }
 
 std::unique_ptr<D2xBlobReader> D2xBlobReader::Create(File::IOFile card, std::span<const u8> list,
-                                                     std::string* error)
+                                                     std::string* error, u32 sector_size)
 {
   const auto refuse = [error](const char* reason) -> std::unique_ptr<D2xBlobReader> {
     if (error)
       *error = reason;
     return nullptr;
   };
+  if (sector_size < 512 || sector_size > 32768 || (sector_size & (sector_size - 1)) != 0)
+    return refuse("invalid backing image sector size");
   if (list.size() < 12 || list.size() > MAX_LIST_SIZE || list.size() % 4 != 0)
     return refuse("invalid fragment list byte size");
 
@@ -55,10 +57,10 @@ std::unique_ptr<D2xBlobReader> D2xBlobReader::Create(File::IOFile card, std::spa
     const u64 sectors = Common::swap32(entry + 8);
     if (sectors == 0 || offset < previous_end || offset + sectors > disc_sectors)
       return refuse("empty, overlapping, unsorted or out-of-disc fragment");
-    if (sector + sectors > card_size / 512)
+    if (sector * sector_size > card_size || sectors * 512 > card_size - sector * sector_size)
       return refuse("fragment extends past the SD card image");
 
-    fragments.push_back({offset * 512, sector * 512, sectors * 512});
+    fragments.push_back({offset * 512, sector * sector_size, sectors * 512});
     previous_end = offset + sectors;
   }
 

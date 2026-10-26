@@ -192,7 +192,13 @@ TEST_F(D2xFileSystemTest, MissingRemovedAndInvalidCardsFail)
   ASSERT_TRUE(invalid.Close());
   File::SetUserPath(F_WIISDCARDIMAGE_IDX, m_directory + "/invalid.raw");
   EXPECT_EQ(m_fs->Mount(), -101);
-  EXPECT_EQ(m_fs->SetMode(2, ""), -101);
+  EXPECT_EQ(m_fs->SetMode(2, ""), -4);
+  const std::string usb_image = m_directory + "/usb.raw";
+  ASSERT_TRUE(Common::SDCardCreate(128, usb_image));
+  Config::SetCurrent(Config::MAIN_WII_USB_IMAGE_PATH, usb_image);
+  EXPECT_EQ(m_fs->Mount(-1, true), 0);
+  EXPECT_EQ(m_fs->SetMode(2, ""), 0);
+  m_fs->Unmount(true);
   File::SetUserPath(F_WIISDCARDIMAGE_IDX, m_image);
   ASSERT_EQ(m_fs->Mount(), 0);
   ASSERT_EQ(m_fs->SetMode(0x101, ""), 0);

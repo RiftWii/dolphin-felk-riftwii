@@ -443,6 +443,12 @@ add_library(core
   IOS/USB/Bluetooth/WiimoteHIDAttr.h
   IOS/USB/Common.cpp
   IOS/USB/Common.h
+  IOS/USB/USBStorage.cpp
+  IOS/USB/USBStorage.h
+  IOS/USB/D2xUSB.cpp
+  IOS/USB/D2xUSB.h
+  IOS/USB/Emulated/MassStorage.cpp
+  IOS/USB/Emulated/MassStorage.h
   IOS/USB/Emulated/Infinity.cpp
   IOS/USB/Emulated/Infinity.h
   IOS/USB/Emulated/Skylanders/Skylander.cpp

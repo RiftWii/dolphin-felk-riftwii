@@ -20,6 +20,7 @@
 #include "Common/Logging/Log.h"
 #include "Core/Config/MainSettings.h"
 #include "Core/IOS/Device.h"
+#include "Core/IOS/USB/USBStorage.h"
 
 namespace IOS::HLE::FS
 {
@@ -92,14 +93,26 @@ bool IsSafePath(std::string_view path)
   return true;
 }
 
+std::string GetImagePath(u32 device)
+{
+  return device == 1 ? USB::StorageImage::GetConfiguredPath() :
+                       File::GetUserPath(F_WIISDCARDIMAGE_IDX);
+}
+
+bool IsImageAvailable(u32 device)
+{
+  return device == 1 ? USB::StorageImage(GetImagePath(device)).GetSectorCount() != 0 :
+                       Config::Get(Config::MAIN_WII_SD_CARD);
+}
+
 class CardCallbacks final : public Common::FatFsCallbacks
 {
 public:
-  explicit CardCallbacks(u32 partition_offset)
-      : image(File::GetUserPath(F_WIISDCARDIMAGE_IDX),
-              Config::Get(Config::MAIN_ALLOW_SD_WRITES) ? "r+b" : "rb",
+  explicit CardCallbacks(u32 partition_offset, u32 device)
+      : image(GetImagePath(device),
+              device == 1 || Config::Get(Config::MAIN_ALLOW_SD_WRITES) ? "r+b" : "rb",
               File::SharedAccess::ReadWrite),
-        m_partition_offset(partition_offset)
+        m_partition_offset(partition_offset), m_device(device)
   {
   }
 
@@ -112,7 +125,7 @@ public:
 
   int DiskWrite(u8, const u8* buffer, u32 sector, unsigned int count) override
   {
-    if (!Config::Get(Config::MAIN_ALLOW_SD_WRITES))
+    if (m_device == 0 && !Config::Get(Config::MAIN_ALLOW_SD_WRITES))
       return RES_WRPRT;
     return Seek(sector, count) && image.WriteBytes(buffer, static_cast<size_t>(count) * 512) ?
                RES_OK :
@@ -126,6 +139,8 @@ public:
     case CTRL_SYNC:
       return image.Flush() ? RES_OK : RES_ERROR;
     case GET_SECTOR_COUNT:
+      if (m_partition_offset > image.GetSize() / 512)
+        return RES_PARERR;
       *static_cast<LBA_t*>(buffer) = static_cast<LBA_t>(image.GetSize() / 512 - m_partition_offset);
       return RES_OK;
     case GET_SECTOR_SIZE:
@@ -150,6 +165,7 @@ private:
   }
 
   u32 m_partition_offset;
+  u32 m_device;
 };
 
 ResultCode ConvertFatResult(int result)
@@ -237,12 +253,14 @@ void D2xFileSystem::LogStop() const
 }
 
 ResultCode D2xFileSystem::Run(const std::string& operation, const std::string& path,
-                              const std::function<int()>& request)
+                              const std::function<int()>& request, u32 device)
 {
+  if (device == 2)
+    device = m_device;
   int result = FR_NOT_READY;
-  if (m_mounted && Config::Get(Config::MAIN_WII_SD_CARD) && m_flush_card())
+  if (m_volumes[device].mounted && IsImageAvailable(device) && (device == 1 || m_flush_card()))
   {
-    CardCallbacks callbacks(m_partition_offset);
+    CardCallbacks callbacks(m_volumes[device].partition_offset, device);
     if (callbacks.image)
     {
       Common::RunInFatFsContext(callbacks, [&] {
@@ -264,17 +282,18 @@ ResultCode D2xFileSystem::Run(const std::string& operation, const std::string& p
   return code;
 }
 
-s32 D2xFileSystem::Mount(s32 partition)
+s32 D2xFileSystem::Mount(s32 partition, bool usb)
 {
-  if (!Config::Get(Config::MAIN_WII_SD_CARD) || !m_flush_card())
+  m_device = usb ? 1 : 0;
+  if (!IsImageAvailable(m_device) || (m_device == 0 && !m_flush_card()))
     return IPC_EINVAL;
-  m_mounted = false;
-  m_partition_offset = 0;
+  m_volumes[m_device].mounted = false;
+  m_volumes[m_device].partition_offset = 0;
   if (partition >= 0)
   {
     if (partition > 3)
       return -101;
-    File::IOFile image(File::GetUserPath(F_WIISDCARDIMAGE_IDX), "rb");
+    File::IOFile image(GetImagePath(m_device), "rb", File::SharedAccess::ReadWrite);
     std::array<u8, 512> mbr{};
     if (!image || !image.ReadBytes(mbr.data(), mbr.size()))
       return -101;
@@ -291,31 +310,33 @@ s32 D2xFileSystem::Mount(s32 partition)
       if (mbr[entry + 4] == 0)
         return -101;
       for (size_t byte = 0; byte < 4; ++byte)
-        m_partition_offset |= static_cast<u32>(mbr[entry + 8 + byte]) << (byte * 8);
-      if (m_partition_offset == 0)
+        m_volumes[m_device].partition_offset |= static_cast<u32>(mbr[entry + 8 + byte]) << (byte * 8);
+      if (m_volumes[m_device].partition_offset == 0)
         return -101;
     }
   }
-  m_mounted = true;
+  m_volumes[m_device].mounted = true;
   const auto result = Run("Mount", "/", [] {
     DIR root{};
     const int status = f_opendir(&root, "0:/");
     return status == FR_OK ? f_closedir(&root) : status;
   });
-  m_mounted = result == ResultCode::Success;
-  return m_mounted ? 0 : -101;
+  m_volumes[m_device].mounted = result == ResultCode::Success;
+  return m_volumes[m_device].mounted ? 0 : -101;
 }
 
-void D2xFileSystem::Unmount()
+void D2xFileSystem::Unmount(bool usb)
 {
   // Requests leave neither host-stream nor FatFs write caches behind.
-  m_flush_card();
-  m_mounted = false;
+  const u32 device = usb ? 1 : 0;
+  if (device == 0)
+    m_flush_card();
+  m_volumes[device].mounted = false;
 }
 
 bool D2xFileSystem::IsEmulated(const std::string& path) const
 {
-  if (!(m_mode & 1) || path == "/tmp/launch.sys")
+  if (!(m_mode & 3) || path == "/tmp/launch.sys")
     return false;
   if (m_mode & 0x100)
     return path.starts_with('/') && !path.starts_with("/dev");
@@ -350,15 +371,15 @@ s32 D2xFileSystem::SetMode(u32 mode, const std::string& path)
     m_flush_card();
     return 0;
   }
-  // USB is not backed by the SD image, including ambiguous SD|USB modes.
-  if ((mode & 3) != 1)
+  if ((mode & 3) == 3)
     return -101;
+  m_device = (mode & 2) != 0 ? 1 : 0;
   if ((!path.empty() && !IsSafePath(path)) || path.find(':') != std::string::npos ||
       path.size() > 255)
     return -101;
-  if (!m_mounted)
+  if (!m_volumes[m_device].mounted)
   {
-    const s32 result = Mount();
+    const s32 result = Mount(-1, m_device == 1);
     if (result < 0)
       return result;
   }
@@ -388,8 +409,12 @@ s32 D2xFileSystem::SetMode(u32 mode, const std::string& path)
 void D2xFileSystem::DoState(PointerWrap& p)
 {
   m_real_fs->DoState(p);
-  p.Do(m_mounted);
-  p.Do(m_partition_offset);
+  p.Do(m_device);
+  for (auto& volume : m_volumes)
+  {
+    p.Do(volume.mounted);
+    p.Do(volume.partition_offset);
+  }
   p.Do(m_mode);
   p.Do(m_nand_path);
   for (auto& handle : m_handles)
@@ -399,6 +424,7 @@ void D2xFileSystem::DoState(PointerWrap& p)
     p.Do(handle.path);
     p.Do(handle.fat_path);
     p.Do(handle.offset);
+    p.Do(handle.device);
   }
   // Reopening by path on the next request rebuilds all FatFs objects; no
   // process pointers, cached FAT sectors, or stale FIL objects are serialized.
@@ -432,7 +458,7 @@ Result<FileHandle> D2xFileSystem::OpenFile(Uid uid, Gid gid, const std::string& 
   });
   if (result != ResultCode::Success)
     return result;
-  *handle = {true, mode, path, BuildPath(path), 0};
+  *handle = {true, mode, path, BuildPath(path), 0, m_device};
   return FileHandle(this, FIRST_FAT_FD + static_cast<Fd>(handle - m_handles.begin()));
 }
 
@@ -483,7 +509,7 @@ Result<u32> D2xFileSystem::Transfer(Fd fd, Mode access, u8* read_buffer, const u
     }
     const int close_status = f_close(&file);
     return status == FR_OK ? close_status : status;
-  });
+  }, handle->device);
   if (result != ResultCode::Success)
     return result;
   handle->offset += transferred;
@@ -513,7 +539,8 @@ Result<FileStatus> D2xFileSystem::GetFileStatus(Fd fd)
     return ResultCode::Invalid;
   FILINFO info{};
   const auto result =
-      Run("FileStats", handle->path, [&] { return f_stat(handle->fat_path.c_str(), &info); });
+      Run("FileStats", handle->path, [&] { return f_stat(handle->fat_path.c_str(), &info); },
+          handle->device);
   if (result != ResultCode::Success)
     return result;
   return FileStatus{handle->offset, static_cast<u32>(info.fsize)};

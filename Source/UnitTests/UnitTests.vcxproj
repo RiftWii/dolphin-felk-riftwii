@@ -69,6 +69,7 @@
     <ClCompile Include="Core\IOS\ES\FormatsTest.cpp" />
     <ClCompile Include="Core\IOS\FS\FileSystemTest.cpp" />
     <ClCompile Include="Core\IOS\FS\D2xFileSystemTest.cpp" />
+    <ClCompile Include="Core\IOS\USB\USBStorageTest.cpp" />
     <ClCompile Include="Core\IOS\USB\SkylandersTest.cpp" />
     <ClCompile Include="Core\MMIOTest.cpp" />
     <ClCompile Include="Core\PageFaultTest.cpp" />

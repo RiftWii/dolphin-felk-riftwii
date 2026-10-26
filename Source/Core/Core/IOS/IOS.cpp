@@ -53,6 +53,7 @@
 #include "Core/IOS/Network/Socket.h"
 #include "Core/IOS/Network/WD/Command.h"
 #include "Core/IOS/SDIO/D2xSDHC.h"
+#include "Core/IOS/USB/D2xUSB.h"
 #include "Core/IOS/SDIO/SDIOSlot0.h"
 #include "Core/IOS/STM/STM.h"
 #include "Core/IOS/USB/Bluetooth/BTEmu.h"
@@ -684,6 +685,7 @@ void EmulationKernel::AddStaticDevices()
   if (IsD2x())
   {
     AddDevice(std::make_unique<FatDevice>(*this, "fat"));
+    AddDevice(std::make_unique<D2xUSBDevice>(*this, "/dev/usb2"));
     AddDevice(std::make_unique<D2xSDHCDevice>(*this, "/dev/sdio/sdhc"));
   }
 

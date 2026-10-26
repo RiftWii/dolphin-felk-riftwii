@@ -22,7 +22,7 @@ public:
   static constexpr u32 MAX_LIST_SIZE = 12 + MAX_FRAGMENTS * 12;
 
   static std::unique_ptr<D2xBlobReader> Create(File::IOFile card, std::span<const u8> list,
-                                               std::string* error);
+                                               std::string* error, u32 sector_size = 512);
 
   BlobType GetBlobType() const override { return BlobType::PLAIN; }
   std::unique_ptr<BlobReader> CopyReader() const override;

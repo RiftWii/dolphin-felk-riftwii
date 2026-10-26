@@ -26,6 +26,7 @@
 #include "Core/IOS/SDIO/SDIOSlot0.h"
 #include "Core/System.h"
 #include "DiscIO/D2xBlob.h"
+#include "Core/IOS/USB/USBStorage.h"
 #include "DiscIO/Volume.h"
 #include "DiscIO/VolumeDisc.h"
 
@@ -201,24 +202,26 @@ std::optional<DIDevice::DIResult> DIDevice::ConfigureD2xFragments(const IOCtlReq
     return refuse(-1, "unknown fragment device");
   if (size > DiscIO::D2xBlobReader::MAX_LIST_SIZE)
     return refuse(-3, "fragment list exceeds d2x's size limit");
-  if (device == 1)
-    return refuse(-4, "USB storage is not backed in Dolphin (device initialization failed)");
-  if (!Config::Get(Config::MAIN_WII_SD_CARD))
+  if (device == 1 && USB::StorageImage(USB::StorageImage::GetConfiguredPath()).GetSectorCount() == 0)
+    return refuse(-4, "USB image is absent or invalid");
+  if (device == 2 && !Config::Get(Config::MAIN_WII_SD_CARD))
     return refuse(-4, "no SD card inserted");
   if (size < 12 || size % 4 != 0 || !IsRAMRange(memory, address, size))
     return refuse(-3, "invalid fragment list size or PPC memory range");
 
   const auto sdio = std::static_pointer_cast<SDIOSlot0Device>(
       GetEmulationKernel().GetDeviceByName("/dev/sdio/slot0"));
-  if (sdio && !sdio->FlushCardImage())
+  if (device == 2 && sdio && !sdio->FlushCardImage())
     return refuse(-4, "could not flush the SDIO image handle");
 
   const auto list = std::span<const u8>(memory.GetPointerForRange(address, size), size);
   std::string error;
   // The read-only DVD handle must allow the loader to reopen the card for log writes.
-  File::IOFile card(File::GetUserPath(F_WIISDCARDIMAGE_IDX), "rb", File::SharedAccess::ReadWrite);
+  const std::string image_path = device == 1 ? USB::StorageImage::GetConfiguredPath() :
+                                                File::GetUserPath(F_WIISDCARDIMAGE_IDX);
+  File::IOFile card(image_path, "rb", File::SharedAccess::ReadWrite);
   if (!card)
-    return refuse(-4, "SD card image could not be opened");
+    return refuse(-4, "backing image could not be opened");
   auto reader = DiscIO::D2xBlobReader::Create(std::move(card), list, &error);
   if (!reader)
     return refuse(-3, error);

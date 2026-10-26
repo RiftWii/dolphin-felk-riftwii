@@ -23,6 +23,7 @@
 #include "Core/Core.h"
 #include "Core/IOS/USB/Common.h"
 #include "Core/IOS/USB/Emulated/Infinity.h"
+#include "Core/IOS/USB/Emulated/MassStorage.h"
 #include "Core/IOS/USB/Emulated/Skylanders/Skylander.h"
 #include "Core/IOS/USB/LibusbDevice.h"
 #include "Core/NetPlayProto.h"
@@ -185,6 +186,11 @@ void USBHost::DispatchHooks(const DeviceChangeHooks& hooks)
 void USBHost::AddEmulatedDevices(std::set<u64>& new_devices, DeviceChangeHooks& hooks,
                                  bool always_add_hooks)
 {
+  if (!USB::StorageImage::GetConfiguredPath().empty() && !NetPlay::IsNetPlayRunning())
+  {
+    CheckAndAddDevice(std::make_unique<USB::MassStorage>(GetEmulationKernel()), new_devices, hooks,
+                      always_add_hooks);
+  }
   if (Config::Get(Config::MAIN_EMULATE_SKYLANDER_PORTAL) && !NetPlay::IsNetPlayRunning())
   {
     auto skylanderportal =

@@ -10,6 +10,7 @@
 #include "Core/HW/Memmap.h"
 #include "Core/IOS/FS/D2xFileSystem.h"
 #include "Core/System.h"
+#include "Core/IOS/USB/USBStorage.h"
 
 namespace IOS::HLE
 {
@@ -24,6 +25,7 @@ void FatDevice::DoState(PointerWrap& p)
 {
   Device::DoState(p);
   p.Do(m_card_started);
+  p.Do(m_usb_started);
 }
 
 std::optional<IPCReply> FatDevice::Open(const OpenRequest& request)
@@ -44,32 +46,38 @@ std::optional<IPCReply> FatDevice::IOCtlV(const IOCtlVRequest& request)
   switch (request.request)
   {
   case IOCTLV_FAT_MOUNT_SD:
+  case IOCTLV_FAT_MOUNT_USB:
   {
-    if (!Config::Get(Config::MAIN_WII_SD_CARD))
+    const bool usb = request.request == IOCTLV_FAT_MOUNT_USB;
+    if (usb ? USB::StorageImage(USB::StorageImage::GetConfiguredPath()).GetSectorCount() == 0 :
+              !Config::Get(Config::MAIN_WII_SD_CARD))
     {
       INFO_LOG_FMT(IOS, "fat: mount SD card failed: no SD card inserted");
       return IPCReply(IPC_EINVAL);
     }
-    m_card_started = true;
+    (usb ? m_usb_started : m_card_started) = true;
     s32 partition = -1;
     if (!request.in_vectors.empty() && request.in_vectors[0].size >= sizeof(u32))
       partition = GetSystem().GetMemory().Read_U32(request.in_vectors[0].address);
-    const s32 result = GetEmulationKernel().GetD2xFS()->Mount(partition);
-    INFO_LOG_FMT(IOS, "fat: mount SD card, partition {}: {}", partition, result);
+    const s32 result = GetEmulationKernel().GetD2xFS()->Mount(partition, usb);
+    INFO_LOG_FMT(IOS, "fat: mount {}, partition {}: {}", usb ? "USB" : "SD", partition, result);
     return IPCReply(result);
   }
   case IOCTLV_FAT_UNMOUNT_SD:
+  case IOCTLV_FAT_UNMOUNT_USB:
   {
+    const bool usb = request.request == IOCTLV_FAT_UNMOUNT_USB;
+    bool& started = usb ? m_usb_started : m_card_started;
     // d2x answers its driver shutdown's result: 1 (true) when it stopped the
     // driver, IPC_EINVAL when the driver was not running.
-    if (!m_card_started)
+    if (!started)
     {
       INFO_LOG_FMT(IOS, "fat: unmount SD card failed: the card was not started");
       return IPCReply(IPC_EINVAL);
     }
-    m_card_started = false;
-    GetEmulationKernel().GetD2xFS()->Unmount();
-    INFO_LOG_FMT(IOS, "fat: unmounted SD card");
+    started = false;
+    GetEmulationKernel().GetD2xFS()->Unmount(usb);
+    INFO_LOG_FMT(IOS, "fat: unmounted {}", usb ? "USB" : "SD");
     return IPCReply(1);
   }
   default:
