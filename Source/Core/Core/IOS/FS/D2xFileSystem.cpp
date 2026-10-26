@@ -93,26 +93,26 @@ bool IsSafePath(std::string_view path)
   return true;
 }
 
-std::string GetImagePath(u32 device)
+std::string GetImagePath(Drive drive)
 {
-  return device == 1 ? USB::StorageImage::GetConfiguredPath() :
-                       File::GetUserPath(F_WIISDCARDIMAGE_IDX);
+  return drive == Drive::USB ? USB::StorageImage::GetConfiguredPath() :
+                               File::GetUserPath(F_WIISDCARDIMAGE_IDX);
 }
 
-bool IsImageAvailable(u32 device)
+bool IsImageAvailable(Drive drive)
 {
-  return device == 1 ? USB::StorageImage(GetImagePath(device)).GetSectorCount() != 0 :
-                       Config::Get(Config::MAIN_WII_SD_CARD);
+  return drive == Drive::USB ? USB::StorageImage(GetImagePath(drive)).GetSectorCount() != 0 :
+                               Config::Get(Config::MAIN_WII_SD_CARD);
 }
 
 class CardCallbacks final : public Common::FatFsCallbacks
 {
 public:
-  explicit CardCallbacks(u32 partition_offset, u32 device)
-      : image(GetImagePath(device),
-              device == 1 || Config::Get(Config::MAIN_ALLOW_SD_WRITES) ? "r+b" : "rb",
+  explicit CardCallbacks(u32 partition_offset, Drive drive)
+      : image(GetImagePath(drive),
+              drive == Drive::USB || Config::Get(Config::MAIN_ALLOW_SD_WRITES) ? "r+b" : "rb",
               File::SharedAccess::ReadWrite),
-        m_partition_offset(partition_offset), m_device(device)
+        m_partition_offset(partition_offset), m_drive(drive)
   {
   }
 
@@ -125,7 +125,7 @@ public:
 
   int DiskWrite(u8, const u8* buffer, u32 sector, unsigned int count) override
   {
-    if (m_device == 0 && !Config::Get(Config::MAIN_ALLOW_SD_WRITES))
+    if (m_drive == Drive::SD && !Config::Get(Config::MAIN_ALLOW_SD_WRITES))
       return RES_WRPRT;
     return Seek(sector, count) && image.WriteBytes(buffer, static_cast<size_t>(count) * 512) ?
                RES_OK :
@@ -165,7 +165,7 @@ private:
   }
 
   u32 m_partition_offset;
-  u32 m_device;
+  Drive m_drive;
 };
 
 ResultCode ConvertFatResult(int result)
@@ -253,14 +253,15 @@ void D2xFileSystem::LogStop() const
 }
 
 ResultCode D2xFileSystem::Run(const std::string& operation, const std::string& path,
-                              const std::function<int()>& request, u32 device)
+                              const std::function<int()>& request,
+                              std::optional<Drive> requested_drive)
 {
-  if (device == 2)
-    device = m_device;
+  const Drive drive = requested_drive.value_or(RedirectDrive());
+  const Volume& volume = VolumeOf(drive);
   int result = FR_NOT_READY;
-  if (m_volumes[device].mounted && IsImageAvailable(device) && (device == 1 || m_flush_card()))
+  if (volume.mounted && IsImageAvailable(drive) && (drive == Drive::USB || m_flush_card()))
   {
-    CardCallbacks callbacks(m_volumes[device].partition_offset, device);
+    CardCallbacks callbacks(volume.partition_offset, drive);
     if (callbacks.image)
     {
       Common::RunInFatFsContext(callbacks, [&] {
@@ -282,18 +283,26 @@ ResultCode D2xFileSystem::Run(const std::string& operation, const std::string& p
   return code;
 }
 
+Drive D2xFileSystem::RedirectDrive() const
+{
+  return (m_mode & 2) != 0 ? Drive::USB : Drive::SD;
+}
+
+// Mounting a drive never changes which drive the NAND emulation uses: that
+// follows d2x's mode alone (a loader may mount both drives).
 s32 D2xFileSystem::Mount(s32 partition, bool usb)
 {
-  m_device = usb ? 1 : 0;
-  if (!IsImageAvailable(m_device) || (m_device == 0 && !m_flush_card()))
+  const Drive drive = usb ? Drive::USB : Drive::SD;
+  Volume& volume = VolumeOf(drive);
+  if (!IsImageAvailable(drive) || (drive == Drive::SD && !m_flush_card()))
     return IPC_EINVAL;
-  m_volumes[m_device].mounted = false;
-  m_volumes[m_device].partition_offset = 0;
+  volume.mounted = false;
+  volume.partition_offset = 0;
   if (partition >= 0)
   {
     if (partition > 3)
       return -101;
-    File::IOFile image(GetImagePath(m_device), "rb", File::SharedAccess::ReadWrite);
+    File::IOFile image(GetImagePath(drive), "rb", File::SharedAccess::ReadWrite);
     std::array<u8, 512> mbr{};
     if (!image || !image.ReadBytes(mbr.data(), mbr.size()))
       return -101;
@@ -310,28 +319,31 @@ s32 D2xFileSystem::Mount(s32 partition, bool usb)
       if (mbr[entry + 4] == 0)
         return -101;
       for (size_t byte = 0; byte < 4; ++byte)
-        m_volumes[m_device].partition_offset |= static_cast<u32>(mbr[entry + 8 + byte]) << (byte * 8);
-      if (m_volumes[m_device].partition_offset == 0)
+        volume.partition_offset |= static_cast<u32>(mbr[entry + 8 + byte]) << (byte * 8);
+      if (volume.partition_offset == 0)
         return -101;
     }
   }
-  m_volumes[m_device].mounted = true;
-  const auto result = Run("Mount", "/", [] {
-    DIR root{};
-    const int status = f_opendir(&root, "0:/");
-    return status == FR_OK ? f_closedir(&root) : status;
-  });
-  m_volumes[m_device].mounted = result == ResultCode::Success;
-  return m_volumes[m_device].mounted ? 0 : -101;
+  volume.mounted = true;
+  const auto result = Run(
+      "Mount", "/",
+      [] {
+        DIR root{};
+        const int status = f_opendir(&root, "0:/");
+        return status == FR_OK ? f_closedir(&root) : status;
+      },
+      drive);
+  volume.mounted = result == ResultCode::Success;
+  return volume.mounted ? 0 : -101;
 }
 
 void D2xFileSystem::Unmount(bool usb)
 {
   // Requests leave neither host-stream nor FatFs write caches behind.
-  const u32 device = usb ? 1 : 0;
-  if (device == 0)
+  const Drive drive = usb ? Drive::USB : Drive::SD;
+  if (drive == Drive::SD)
     m_flush_card();
-  m_volumes[device].mounted = false;
+  VolumeOf(drive).mounted = false;
 }
 
 bool D2xFileSystem::IsEmulated(const std::string& path) const
@@ -373,17 +385,18 @@ s32 D2xFileSystem::SetMode(u32 mode, const std::string& path)
   }
   if ((mode & 3) == 3)
     return -101;
-  m_device = (mode & 2) != 0 ? 1 : 0;
+  // The new mode's drive; the active mode keeps its own until this succeeds.
+  const Drive drive = (mode & 2) != 0 ? Drive::USB : Drive::SD;
   if ((!path.empty() && !IsSafePath(path)) || path.find(':') != std::string::npos ||
       path.size() > 255)
     return -101;
-  if (!m_volumes[m_device].mounted)
+  if (!VolumeOf(drive).mounted)
   {
-    const s32 result = Mount(-1, m_device == 1);
+    const s32 result = Mount(-1, drive == Drive::USB);
     if (result < 0)
       return result;
   }
-  const auto ready = Run("SetMode", path, [] { return FR_OK; });
+  const auto ready = Run("SetMode", path, [] { return FR_OK; }, drive);
   if (ready != ResultCode::Success)
     return ConvertResult(ready);
 
@@ -409,7 +422,6 @@ s32 D2xFileSystem::SetMode(u32 mode, const std::string& path)
 void D2xFileSystem::DoState(PointerWrap& p)
 {
   m_real_fs->DoState(p);
-  p.Do(m_device);
   for (auto& volume : m_volumes)
   {
     p.Do(volume.mounted);
@@ -424,7 +436,7 @@ void D2xFileSystem::DoState(PointerWrap& p)
     p.Do(handle.path);
     p.Do(handle.fat_path);
     p.Do(handle.offset);
-    p.Do(handle.device);
+    p.Do(handle.drive);
   }
   // Reopening by path on the next request rebuilds all FatFs objects; no
   // process pointers, cached FAT sectors, or stale FIL objects are serialized.
@@ -458,7 +470,7 @@ Result<FileHandle> D2xFileSystem::OpenFile(Uid uid, Gid gid, const std::string& 
   });
   if (result != ResultCode::Success)
     return result;
-  *handle = {true, mode, path, BuildPath(path), 0, m_device};
+  *handle = {true, mode, path, BuildPath(path), 0, RedirectDrive()};
   return FileHandle(this, FIRST_FAT_FD + static_cast<Fd>(handle - m_handles.begin()));
 }
 
@@ -509,7 +521,7 @@ Result<u32> D2xFileSystem::Transfer(Fd fd, Mode access, u8* read_buffer, const u
     }
     const int close_status = f_close(&file);
     return status == FR_OK ? close_status : status;
-  }, handle->device);
+  }, handle->drive);
   if (result != ResultCode::Success)
     return result;
   handle->offset += transferred;
@@ -540,7 +552,7 @@ Result<FileStatus> D2xFileSystem::GetFileStatus(Fd fd)
   FILINFO info{};
   const auto result =
       Run("FileStats", handle->path, [&] { return f_stat(handle->fat_path.c_str(), &info); },
-          handle->device);
+          handle->drive);
   if (result != ResultCode::Success)
     return result;
   return FileStatus{handle->offset, static_cast<u32>(info.fsize)};

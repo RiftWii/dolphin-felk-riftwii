@@ -233,6 +233,24 @@ TEST_F(D2xFileSystemTest, SavestateRestoresRoutingAndHandleOffsets)
   EXPECT_EQ(m_fs->Close(fd), ResultCode::Success);
 }
 
+// The NAND emulation stays on the drive its mode names: mounting the USB drive,
+// or a refused switch to USB, must not move SD saves onto the USB image.
+TEST_F(D2xFileSystemTest, RedirectFollowsModeNotLastMount)
+{
+  const std::string usb_image = m_directory + "/usb.raw";
+  ASSERT_TRUE(Common::SDCardCreate(128, usb_image));
+  Config::SetCurrent(Config::MAIN_WII_USB_IMAGE_PATH, usb_image);
+  ASSERT_EQ(m_fs->Mount(-1, true), 0);
+  EXPECT_EQ(m_fs->SetMode(0x102, "/bad:path"), -101);
+
+  ASSERT_EQ(m_fs->CreateFile(0, 0, "/title/onsd", 0, modes), ResultCode::Success);
+
+  ASSERT_EQ(m_fs->SetMode(0x102, ""), 0);
+  EXPECT_EQ(m_fs->GetMetadata(0, 0, "/title/onsd").Error(), ResultCode::NotFound);
+  ASSERT_EQ(m_fs->SetMode(0x101, ""), 0);
+  EXPECT_TRUE(m_fs->GetMetadata(0, 0, "/title/onsd"));
+}
+
 TEST_F(D2xFileSystemTest, SuperfloppyPartitionSelectionAndEmptyWrite)
 {
   ASSERT_EQ(m_fs->Mount(0), 0);

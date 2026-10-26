@@ -114,7 +114,12 @@ void SDIOSlot0Device::OpenInternal()
 
 bool SDIOSlot0Device::FlushCardImage()
 {
-  return !m_card.IsOpen() || m_card.Flush();
+  if (!m_card.IsOpen())
+    return true;
+  // IOFile::Flush reports any earlier error too; start clean so one failed
+  // request does not make every later flush fail.
+  m_card.ClearError();
+  return m_card.Flush();
 }
 
 std::optional<IPCReply> SDIOSlot0Device::Open(const OpenRequest& request)
