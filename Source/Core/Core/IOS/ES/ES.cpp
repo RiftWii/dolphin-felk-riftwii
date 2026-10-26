@@ -794,7 +794,42 @@ std::optional<IPCReply> ESDevice::LaunchBC(const IOCtlVRequest& request)
 // So we block access to it from the IPC interface.
 IPCReply ESDevice::DIVerify(const IOCtlVRequest& request)
 {
-  return IPCReply(ES_EINVAL);
+  // ES_Identify from the PPC, as a loader sends it to run a channel as that
+  // title: certificates, an empty vector, the ticket and the TMD in; the key
+  // ID and the contents' hashes out (RiftWii's test build of Dolphin).
+  // One ticket, and a TMD of at most 512 contents (the header, then 0x24
+  // bytes a content): sizes the guest gives are checked before anything is
+  // allocated for them.
+  constexpr u32 TICKET_BYTES = 0x2A4;
+  constexpr u32 MAX_TMD_BYTES = 0x1E4 + 512 * 0x24;
+  if (request.in_vectors.size() != 4 || request.io_vectors.size() < 1 ||
+      request.in_vectors[2].size != TICKET_BYTES || request.in_vectors[3].size == 0 ||
+      request.in_vectors[3].size > MAX_TMD_BYTES || request.io_vectors[0].size < sizeof(u32))
+  {
+    return IPCReply(ES_EINVAL);
+  }
+
+  auto& system = GetSystem();
+  auto& memory = system.GetMemory();
+  std::vector<u8> ticket_bytes(request.in_vectors[2].size);
+  memory.CopyFromEmu(ticket_bytes.data(), request.in_vectors[2].address, ticket_bytes.size());
+  std::vector<u8> tmd_bytes(request.in_vectors[3].size);
+  memory.CopyFromEmu(tmd_bytes.data(), request.in_vectors[3].address, tmd_bytes.size());
+  const ES::TicketReader ticket{std::move(ticket_bytes)};
+  const ES::TMDReader tmd{std::move(tmd_bytes)};
+
+  const ReturnCode ret = DIVerify(tmd, ticket);
+  if (ret != IPC_SUCCESS)
+  {
+    ERROR_LOG_FMT(IOS_ES, "ES_Identify: refused ({})", static_cast<int>(ret));
+    return IPCReply(ret);
+  }
+  // A channel, not a disc: as LaunchTitle sets it for an installed title.
+  m_core.m_title_context.Update(tmd, ticket, DiscIO::Platform::WiiWAD);
+  NOTICE_LOG_FMT(IOS_ES, "ES_Identify: running as {:016x} (uid {:08x}, gid {:04x})", tmd.GetTitleId(),
+                 GetEmulationKernel().GetUidForPPC(), GetEmulationKernel().GetGidForPPC());
+  memory.Write_U32(0, request.io_vectors[0].address);
+  return IPCReply(IPC_SUCCESS);
 }
 
 static ReturnCode WriteTmdForDiVerify(FS::FileSystem* fs, const ES::TMDReader& tmd)

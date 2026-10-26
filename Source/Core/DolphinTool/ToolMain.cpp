@@ -13,6 +13,8 @@
 
 #include "Common/StringUtil.h"
 #include "Core/Core.h"
+#include "Core/WiiUtils.h"
+#include "UICommon/UICommon.h"
 
 #include "DolphinTool/ConvertCommand.h"
 #include "DolphinTool/ExtractCommand.h"
@@ -23,7 +25,32 @@ static void PrintUsage()
 {
   fmt::print(std::cerr, "usage: dolphin-tool COMMAND -h\n"
                         "\n"
-                        "commands supported: [convert, verify, header, extract]\n");
+                        "commands supported: [convert, verify, header, extract, installwad]\n");
+}
+
+// installwad <user folder> <wad>...: installs each WAD into that user
+// folder's NAND for good, as Tools > Install WAD does (booting a WAD only
+// installs it until emulation stops). For RiftWii's channel tests.
+static int InstallWads(const std::vector<std::string>& args)
+{
+  if (args.size() < 2)
+  {
+    fmt::print(std::cerr, "usage: dolphin-tool installwad <user folder> <wad>...\n");
+    return EXIT_FAILURE;
+  }
+  UICommon::SetUserDirectory(args[0]);
+  UICommon::CreateDirectories();
+  UICommon::Init();
+  int failed = 0;
+  for (size_t i = 1; i < args.size(); ++i)
+  {
+    const bool installed = WiiUtils::InstallWAD(args[i]);
+    fmt::print(std::cerr, "{}: {}\n", args[i], installed ? "installed" : "FAILED");
+    if (!installed)
+      ++failed;
+  }
+  UICommon::Shutdown();
+  return failed == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
 }
 
 #ifdef _WIN32
@@ -52,6 +79,8 @@ int main(int argc, char* argv[])
     return DolphinTool::HeaderCommand(args);
   else if (command_str == "extract")
     return DolphinTool::Extract(args);
+  else if (command_str == "installwad")
+    return InstallWads(args);
   PrintUsage();
   return EXIT_FAILURE;
 }
