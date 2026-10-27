@@ -123,6 +123,7 @@ jobs:
             -DPython3_ROOT_DIR="$(brew --prefix python@3.12)" \
             -DPython3_EXECUTABLE="$(brew --prefix python@3.12)/bin/python3.12" \
             -DUSE_SYSTEM_FMT=OFF \
+            -DUSE_SYSTEM_SDL2=OFF \
             -DMACOS_CODE_SIGNING=OFF \
             -DUSE_BUNDLED_MOLTENVK=ON \
             -DSKIP_POSTPROCESS_BUNDLE=OFF \
