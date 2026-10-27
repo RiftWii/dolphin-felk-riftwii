@@ -1,9 +1,10 @@
 name: CI
 
 on:
-  # Other branches run through their pull request, so a push to a PR's branch doesn't run everything twice
+  # Other branches run through their pull request, so a push to a PR's branch doesn't run everything
+  # twice. es-identify is PR #1's base, so pushes to it are checked too.
   push:
-    branches: [master]
+    branches: [master, es-identify]
     paths-ignore: ['**.md', 'docs/**']
   pull_request:
     paths-ignore: ['**.md', 'docs/**']

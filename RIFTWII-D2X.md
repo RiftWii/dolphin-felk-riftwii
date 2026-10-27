@@ -86,4 +86,5 @@ state. Tested on a Mac with Mario Kart Wii, 27 October 2026.
 ## Building
 
 As the `es-identify` branch: Visual Studio 2022, `Source/dolphin-emu.sln`,
-Release x64. RiftWii's `docs/HARNESS.md` says how to run it.
+Release x64, or CMake on Linux and macOS (CI builds and tests all three). RiftWii's
+`docs/HARNESS.md` says how to run it.

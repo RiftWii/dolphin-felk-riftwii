@@ -247,6 +247,12 @@ bool LoadFromBuffer(Core::System& system, std::vector<u8>& buffer)
         ptr = backup.data();
         PointerWrap p(&ptr, buffer_size, PointerWrap::Mode::Write);
         DoState(system, p);
+        if (!p.IsWriteMode())
+        {
+          Core::DisplayMessage("The savestate could not be loaded", OSD::Duration::NORMAL);
+          result = false;
+          return;
+        }
 
         if (!ReadStateBuffer(system, buffer))
         {
@@ -911,7 +917,9 @@ void LoadAs(Core::System& system, const std::string& filename)
   Core::RunOnCPUThread(
       system,
       [&] {
-        // Every attempted load needs an undo snapshot, including refused d2x loads.
+        // Every attempted load needs an undo snapshot, including refused d2x loads. Unlike
+        // upstream, it's also taken while a movie starts recording from this state; only the
+        // movie backup is skipped then.
         auto& movie = system.GetMovie();
         {
           std::lock_guard lk2(s_undo_load_buffer_mutex);
