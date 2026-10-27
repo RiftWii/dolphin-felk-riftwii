@@ -604,4 +604,42 @@ TEST_F(D2xFileSystemTest, DirectoryRenameUpdatesChildrenButNotSharedPrefixes)
   EXPECT_EQ(m_fs->GetMetadata(0, 0, "/title/b/child?")->size, 1u);
   EXPECT_EQ(m_fs->GetMetadata(0, 0, "/title/ab/child?")->size, 1u);
 }
+
+TEST_F(D2xFileSystemTest, UnsafePathsAreRejected)
+{
+  ASSERT_EQ(m_fs->CreateDirectory(0, 0, "/title/a", 0, modes), ResultCode::Success);
+  const std::string bad = std::string("/title/a") + '\x01' + "x";
+  EXPECT_EQ(m_fs->CreateFile(0, 0, bad, 0, modes), ResultCode::NotFound);
+  EXPECT_EQ(m_fs->Rename(0, 0, "/title/a", std::string("/title") + '\x01' + "x"),
+            ResultCode::NotFound);
+  for (const char* path : {"/title/a.", "/title/a ", "/title//a", "/title/a./c"})
+    EXPECT_EQ(m_fs->Rename(0, 0, "/title/a", path), ResultCode::NotFound);
+  EXPECT_TRUE(m_fs->GetMetadata(0, 0, "/title/a"));
+}
+
+TEST_F(D2xFileSystemTest, SafePathsStillWork)
+{
+  EXPECT_TRUE(m_fs->ReadDirectory(0, 0, "/"));
+  for (const char* path : {"/title/a.b", "/title/a b"})
+    EXPECT_EQ(m_fs->CreateFile(0, 0, path, 0, modes), ResultCode::Success);
+  for (const char* path : {"/title/..", "/title/./a", "/title/a.", "/title//a"})
+    EXPECT_EQ(m_fs->CreateFile(0, 0, path, 0, modes), ResultCode::NotFound);
+  EXPECT_EQ(m_fs->SetMode(0x101, "/nands/slash/"), 0);
+  EXPECT_EQ(m_fs->SetMode(0x101, std::string("/nands/") + '\x01'), -101);
+  EXPECT_EQ(m_fs->SetMode(0x101, "/nands//x"), -101);
+  ASSERT_EQ(m_fs->SetMode(0x101, ""), 0);
+}
+
+TEST_F(D2xFileSystemTest, RenameIntoOwnSubfolderIsRefused)
+{
+  ASSERT_EQ(m_fs->CreateDirectory(0, 0, "/title/abcdefghij", 0, modes), ResultCode::Success);
+  EXPECT_EQ(m_fs->Rename(0, 0, "/title/abcdefghij", "/title/ABCDEF~1/c"), ResultCode::Invalid);
+  EXPECT_TRUE(m_fs->GetMetadata(0, 0, "/title/abcdefghij"));
+  ASSERT_EQ(m_fs->CreateDirectory(0, 0, "/title/a", 0, modes), ResultCode::Success);
+  ASSERT_EQ(m_fs->CreateDirectory(0, 0, "/title/a/b", 0, modes), ResultCode::Success);
+  ASSERT_EQ(m_fs->CreateFile(0, 0, "/title/a/b/f", 0, modes), ResultCode::Success);
+  EXPECT_EQ(m_fs->Rename(0, 0, "/title/a", "/title/a/c"), ResultCode::Invalid);
+  EXPECT_EQ(m_fs->Rename(0, 0, "/title/a", "/title/A/c"), ResultCode::Invalid);
+  EXPECT_TRUE(m_fs->GetMetadata(0, 0, "/title/a/b/f"));
+}
 }  // namespace

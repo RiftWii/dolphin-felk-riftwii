@@ -4,6 +4,7 @@
 #include "Core/IOS/FS/D2xFileSystem.h"
 
 #include <algorithm>
+#include <cctype>
 #include <string_view>
 #include <utility>
 
@@ -76,25 +77,86 @@ std::string UnescapeName(std::string_view name)
   return unescaped;
 }
 
-// FatFs interprets dot components and backslashes itself. Do not allow them to
-// escape the selected NAND folder, even though the host backend is permissive.
+// FatFs ends paths at control characters, skips empty components and drops trailing dots and
+// spaces, and interprets backslashes itself. Refuse all of them, so a checked path names exactly
+// one object inside the selected NAND folder, even though the host backend is permissive.
 bool IsSafePath(std::string_view path)
 {
   if (!path.starts_with('/') || path.find('\\') != std::string_view::npos ||
-      path.find('\0') != std::string_view::npos)
+      std::any_of(path.begin(), path.end(),
+                  [](char c) { return static_cast<unsigned char>(c) < 0x20; }))
     return false;
+  if (path == "/")
+    return true;
   while (!path.empty())
   {
     path.remove_prefix(1);
     const auto separator = path.find('/');
     const auto component = path.substr(0, separator);
-    if (component == "." || component == "..")
+    if (component.empty() || component.ends_with('.') || component.ends_with(' '))
       return false;
     if (separator == std::string_view::npos)
       break;
     path.remove_prefix(separator);
   }
   return true;
+}
+
+// FatFs matches names without regard to ASCII case.
+bool IsInsideFolder(std::string_view path, std::string_view folder)
+{
+  if (path.size() <= folder.size() || path[folder.size()] != '/')
+    return false;
+  return std::equal(folder.begin(), folder.end(), path.begin(), [](char a, char b) {
+    return std::tolower(static_cast<unsigned char>(a)) ==
+           std::tolower(static_cast<unsigned char>(b));
+  });
+}
+
+// The path as the card identifies it: each existing component replaced by its 8.3 short name,
+// which is unique in its folder and the same however the guest spelled it (long name, other
+// case, or the short name itself). Components after the first missing one stay as written.
+std::string ResolveNames(const std::string& path)
+{
+  const std::string_view full{path};
+  const size_t first_slash = full.find('/');
+  if (first_slash == std::string_view::npos)
+    return path;
+  std::string result{full.substr(0, first_slash)};
+  std::string_view rest = full.substr(first_slash + 1);
+  bool missing = false;
+  while (true)
+  {
+    const size_t next_slash = rest.find('/');
+    std::string_view component =
+        next_slash == std::string_view::npos ? rest : rest.substr(0, next_slash);
+    if (!component.empty())
+    {
+      const std::string candidate = result + '/' + std::string{component};
+      if (missing)
+      {
+        result = candidate;
+      }
+      else
+      {
+        FILINFO info{};
+        if (f_stat(candidate.c_str(), &info) != FR_OK)
+        {
+          result = candidate;
+          missing = true;
+        }
+        else
+        {
+          result += '/';
+          result += info.altname[0] != '\0' ? info.altname : info.fname;
+        }
+      }
+    }
+    if (next_slash == std::string_view::npos)
+      break;
+    rest = rest.substr(next_slash + 1);
+  }
+  return result;
 }
 
 std::string GetImagePath(Drive drive)
@@ -451,7 +513,11 @@ s32 D2xFileSystem::SetMode(u32 mode, const std::string& path)
     return -101;
   // The new mode's drive; the active mode keeps its own until this succeeds.
   const Drive drive = (mode & 2) != 0 ? Drive::USB : Drive::SD;
-  if ((!path.empty() && !IsSafePath(path)) || path.find(':') != std::string::npos ||
+  // Some loaders name the folder with a trailing slash; FatFs skips the empty component it leaves.
+  std::string_view folder = path;
+  if (folder.size() > 1 && folder.ends_with('/'))
+    folder.remove_suffix(1);
+  if ((!folder.empty() && !IsSafePath(folder)) || path.find(':') != std::string::npos ||
       path.size() > 255)
     return -101;
   if (!VolumeOf(drive).mounted)
@@ -800,6 +866,11 @@ ResultCode D2xFileSystem::Rename(Uid uid, Gid gid, const std::string& old_path,
     int result = f_stat(source.c_str(), &info);
     if (result != FR_OK || source == destination)
       return result;
+    // f_rename doesn't stop a folder moving into itself, which would cut it off from the card
+    // image. A move onto the folder's own parent, or a capitals-only rename, deletes it as d2x
+    // does (decided on PR #1).
+    if (IsInsideFolder(ResolveNames(destination), ResolveNames(source)))
+      return static_cast<int>(FR_INVALID_PARAMETER);
     // d2x replaces existing files and recursively removes destination folders.
     result = f_stat(destination.c_str(), &info);
     if (result == FR_OK)
