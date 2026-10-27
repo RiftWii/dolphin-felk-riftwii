@@ -25,6 +25,17 @@ public:
   bool Read(u32 sector, std::span<u8> data) const;
   bool Write(u32 sector, std::span<const u8> data) const;
 
+  struct Identity
+  {
+    bool readable = false;
+    std::string path;
+    u64 size = 0;
+    u32 fingerprint = 0;
+
+    bool operator==(const Identity&) const = default;
+  };
+  Identity GetIdentity() const;
+
 private:
   std::string m_path;
 };
@@ -35,7 +46,7 @@ class StorageTransport
 {
 public:
   explicit StorageTransport(StorageImage image);
-  void DoState(PointerWrap& p);
+  void DoState(PointerWrap& p, bool check_image = true);
   void Reset();
   int Transfer(bool input, std::span<u8> data);
 

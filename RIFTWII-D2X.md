@@ -55,6 +55,12 @@ before Dolphin checks for an inserted disc
   state is used (`Source/Core/Core/IOS/FS/D2xFileSystem.cpp`). The
   files on the card aren't compared, so a card whose files changed
   still loads.
+- The emulated USB drive records its image's path, size and a
+  fingerprint of its first sectors; a state saved mid-command
+  against a changed image is refused with `This savestate cannot
+  be loaded because the USB image has changed while a USB command
+  was in progress`, while an idle drive is simply reset
+  (`Source/Core/Core/IOS/USB/USBStorage.cpp`).
 - A state saved when one side is d2x and the other isn't, or when
   both differ in IOS features while one of them is d2x, is refused
   with `This savestate was saved under a different IOS (d2x or IOS

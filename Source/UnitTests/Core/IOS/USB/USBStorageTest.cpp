@@ -291,6 +291,62 @@ TEST_F(USBStorageTest, SavedCommandPhaseDiscardsLaterPendingWrite)
   CheckStatus();
 }
 
+TEST_F(USBStorageTest, SavedWriteRefusedWhenImageChanged)
+{
+  Begin(MakeCommand(0x2a, 1024, false, 2, 2));
+  auto state = SaveState();
+
+  const std::string other_path = m_directory + "/usb_other.raw";
+  std::vector<u8> other_contents(32 * 512, 0xa5);
+  {
+    File::IOFile other_image(other_path, "wb");
+    ASSERT_TRUE(other_image.WriteBytes(other_contents.data(), other_contents.size()));
+    ASSERT_TRUE(other_image.Close());
+  }
+
+  StorageTransport other_transport{StorageImage{other_path}};
+  u8* cursor = state.data();
+  PointerWrap reader(&cursor, state.size(), PointerWrap::Mode::Read);
+  other_transport.DoState(reader);
+  EXPECT_FALSE(reader.IsReadMode());
+
+  std::vector<u8> payload(1024, 0x71);
+  EXPECT_LT(other_transport.Transfer(false, payload), 0);
+
+  StorageImage check(other_path);
+  std::vector<u8> actual(1024);
+  ASSERT_TRUE(check.Read(2, actual));
+  EXPECT_EQ(actual, std::vector<u8>(actual.size(), 0xa5));
+}
+
+TEST_F(USBStorageTest, IdleStateLoadsAgainstChangedImage)
+{
+  auto state = SaveState();
+
+  const std::string other_path = m_directory + "/usb_other.raw";
+  std::vector<u8> other_contents(64 * 512, 0);
+  {
+    File::IOFile other_image(other_path, "wb");
+    ASSERT_TRUE(other_image.WriteBytes(other_contents.data(), other_contents.size()));
+    ASSERT_TRUE(other_image.Close());
+  }
+
+  m_transport = std::make_unique<StorageTransport>(StorageImage(other_path));
+  LoadState(state);
+
+  Begin(MakeCommand(0x2a, 512, false, 4, 1));
+  std::array<u8, 512> payload{};
+  payload.fill(0x5a);
+  ASSERT_EQ(m_transport->Transfer(false, payload), 512);
+  CheckStatus();
+
+  Begin(MakeCommand(0x28, 512, true, 4, 1));
+  std::array<u8, 512> readback{};
+  ASSERT_EQ(m_transport->Transfer(true, readback), 512);
+  EXPECT_EQ(readback, payload);
+  CheckStatus();
+}
+
 TEST_F(USBStorageTest, MalformedWrappersStallUntilReset)
 {
   for (size_t field : {size_t{0}, size_t{12}, size_t{14}})
