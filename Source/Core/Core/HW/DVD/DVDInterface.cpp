@@ -162,38 +162,56 @@ void DVDInterface::DoState(PointerWrap& p)
   p.Do(m_disc_path_to_insert);
 
   const bool had_d2x_disc = !m_d2x_fragment_list.empty();
-  p.Do(m_d2x_device);
-  p.Do(m_d2x_fragment_list);
-  p.Do(m_d2x_game_id);
-  if (p.IsReadMode() && !m_d2x_fragment_list.empty())
+  u32 d2x_device = m_d2x_device;
+  std::vector<u8> d2x_fragment_list = m_d2x_fragment_list;
+  std::string d2x_game_id = m_d2x_game_id;
+  p.Do(d2x_device);
+  p.Do(d2x_fragment_list);
+  p.Do(d2x_game_id);
+  if (p.IsReadMode() && !d2x_fragment_list.empty())
   {
     std::unique_ptr<DiscIO::VolumeDisc> disc;
     std::string error;
-    if (CreateD2xDisc(m_d2x_device, m_d2x_fragment_list, &error, &disc) == 0 &&
-        disc->GetGameID() != m_d2x_game_id)
+    if (CreateD2xDisc(d2x_device, d2x_fragment_list, &error, &disc) == 0 &&
+        disc->GetGameID() != d2x_game_id)
     {
-      error = fmt::format("the image now holds {} instead of {}", disc->GetGameID(), m_d2x_game_id);
+      error = fmt::format("the image now holds {} instead of {}", disc->GetGameID(), d2x_game_id);
       disc.reset();
     }
     if (!disc)
     {
-      // Dolphin undoes the load, which also puts the recipe back.
+      // Keep the running recipe if reconstruction fails before replacing the disc.
       ERROR_LOG_FMT(DVDINTERFACE, "Failed to restore d2x disc from savestate: {}", error);
       Core::DisplayMessage(fmt::format("The d2x game could not be restored: {}", error), 4000);
       p.SetMeasureMode();
       return;
     }
-    m_disc_end_offset = GetDiscEndOffset(*disc);
+    const u64 disc_end_offset = GetDiscEndOffset(*disc);
     // Restore before DVDThread checks for a disc, without the effects of a user disc swap.
-    m_system.GetDVDThread().SetDisc(std::move(disc));
+    auto previous_disc = m_system.GetDVDThread().SetDisc(std::move(disc));
+    if (!had_d2x_disc)
+    {
+      m_disc_end_offset_before_d2x_restore = previous_disc ? m_disc_end_offset : 0;
+      m_disc_before_d2x_restore = std::move(previous_disc);
+    }
+    m_disc_end_offset = disc_end_offset;
   }
   else if (p.IsReadMode() && had_d2x_disc)
   {
-    // The state predates the d2x game, so its virtual disc can't be the one the state expects.
-    m_system.GetDVDThread().SetDisc(nullptr);
+    m_disc_end_offset = m_disc_before_d2x_restore ? m_disc_end_offset_before_d2x_restore : 0;
+    m_disc_end_offset_before_d2x_restore = 0;
+    m_system.GetDVDThread().SetDisc(std::move(m_disc_before_d2x_restore));
+  }
+  if (p.IsReadMode())
+  {
+    m_d2x_device = d2x_device;
+    m_d2x_fragment_list = std::move(d2x_fragment_list);
+    m_d2x_game_id = std::move(d2x_game_id);
   }
 
   m_system.GetDVDThread().DoState(p);
+  if (p.IsReadMode() && !IsDiscInside())
+    m_disc_end_offset = 0;
 
   m_adpcm_decoder.DoState(p);
 }
@@ -407,6 +425,9 @@ void DVDInterface::ResetDrive(bool spinup)
 void DVDInterface::Shutdown()
 {
   m_system.GetDVDThread().Stop();
+  m_disc_before_d2x_restore.reset();
+  m_disc_end_offset_before_d2x_restore = 0;
+  m_disc_end_offset = 0;
 }
 
 static u64 GetDiscEndOffset(const DiscIO::VolumeDisc& disc)
@@ -439,6 +460,9 @@ static u64 GetDiscEndOffset(const DiscIO::VolumeDisc& disc)
 void DVDInterface::SetDisc(std::unique_ptr<DiscIO::VolumeDisc> disc,
                            std::optional<std::vector<std::string>> auto_disc_change_paths = {})
 {
+  m_disc_before_d2x_restore.reset();
+  m_disc_end_offset_before_d2x_restore = 0;
+  m_disc_end_offset = 0;
   m_d2x_device = 0;
   m_d2x_fragment_list.clear();
   m_d2x_game_id.clear();

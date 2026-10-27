@@ -26,6 +26,7 @@ struct EventType;
 }
 namespace DiscIO
 {
+class Volume;
 class VolumeDisc;
 struct Partition;
 }  // namespace DiscIO
@@ -302,6 +303,10 @@ private:
   u32 m_d2x_device = 0;
   std::vector<u8> m_d2x_fragment_list;
   std::string m_d2x_game_id;
+
+  // Keep the replaced disc so undoing a refused d2x restore can put it back. Not savestated.
+  std::unique_ptr<DiscIO::Volume> m_disc_before_d2x_restore;
+  u64 m_disc_end_offset_before_d2x_restore = 0;
 
   // Events
   CoreTiming::EventType* m_finish_executing_command = nullptr;
