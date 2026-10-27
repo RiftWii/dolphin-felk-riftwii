@@ -19,6 +19,7 @@
 #include "Core/Config/MainSettings.h"
 #include "Core/Config/SessionSettings.h"
 #include "Core/Core.h"
+#include "Core/HW/DVD/DVDInterface.h"
 #include "Core/HW/Memmap.h"
 #include "Core/IOS/IOS.h"
 #include "Core/IOS/VersionInfo.h"
@@ -88,9 +89,11 @@ void SDIOSlot0Device::EventNotify()
 
 void SDIOSlot0Device::OpenInternal()
 {
+  // A d2x disc read from the card keeps the image open across IOS reloads, also into a stock
+  // IOS, so share it whenever one is inserted.
+  const bool share = GetEmulationKernel().IsD2x() || GetSystem().GetDVDInterface().HasD2xDisc();
   const std::string filename = File::GetUserPath(F_WIISDCARDIMAGE_IDX);
-  const auto shared_access =
-      GetEmulationKernel().IsD2x() ? File::SharedAccess::ReadWrite : File::SharedAccess::Default;
+  const auto shared_access = share ? File::SharedAccess::ReadWrite : File::SharedAccess::Default;
   m_card.Open(filename, "r+b", shared_access);
   if (!m_card)
   {
@@ -106,9 +109,9 @@ void SDIOSlot0Device::OpenInternal()
                             "from a read-only directory?");
     }
   }
-  // d2x uses another host handle for FatFs requests. Disable read-ahead and
+  // d2x (and its disc reader) use other host handles. Disable read-ahead and
   // deferred writes here so sector access observes those requests immediately.
-  if (m_card.IsOpen() && GetEmulationKernel().IsD2x())
+  if (m_card.IsOpen() && share)
     std::setvbuf(m_card.GetHandle(), nullptr, _IONBF, 0);
 }
 

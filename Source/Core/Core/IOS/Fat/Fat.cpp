@@ -52,7 +52,8 @@ std::optional<IPCReply> FatDevice::IOCtlV(const IOCtlVRequest& request)
     if (usb ? USB::StorageImage(USB::StorageImage::GetConfiguredPath()).GetSectorCount() == 0 :
               !Config::Get(Config::MAIN_WII_SD_CARD))
     {
-      INFO_LOG_FMT(IOS, "fat: mount SD card failed: no SD card inserted");
+      INFO_LOG_FMT(IOS, "fat: mount {} failed: no {} inserted", usb ? "USB" : "SD card",
+                   usb ? "USB drive" : "SD card");
       return IPCReply(IPC_EINVAL);
     }
     (usb ? m_usb_started : m_card_started) = true;

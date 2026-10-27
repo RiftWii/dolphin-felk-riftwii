@@ -105,7 +105,8 @@ emulating, RiftWii touches neither libfat nor the card.
   `IsD2x()` (else -101 as before). Validates vectors (>= 1 in-vector, first
   >= 4 bytes; -6 otherwise), stores mode (OR 0x80 when enabling, as d2x) and
   path (truncated to 255 + NUL in a 256-byte field), logs mode + path at
-  INFO, answers 0. Mode without SD/USB bits clears the stored state and
+  INFO, answers 0, or -4/-101 when the card can't be mounted or the folder
+  is invalid. Mode without SD/USB bits clears the stored state and
   answers 0. Stored in `FSCore`, so it dies with the IOS instance like d2x's
   `config`, and is savestated.
 - ioctlv 100 answers -6 while a title runs, as d2x does (d2x lets ES turn
@@ -197,5 +198,5 @@ is linkable with custom disk callbacks (`Common/FatFsUtil.h`,
 - `Source/Core/Core/IOS/FS/D2xFileSystem.{h,cpp}` (new: the redirect)
 - `Source/Core/Core/IOS/SDIO/SDIOSlot0.{h,cpp}` (card image flush, no
   buffering while d2x runs)
-- `Source/UnitTests/Core/IOS/FS/D2xFileSystemTest.cpp` (new: 8 tests)
+- `Source/UnitTests/Core/IOS/FS/D2xFileSystemTest.cpp` (new: the d2x unit tests)
 - `RIFTWII-D2X-NAND.md` (this file)
