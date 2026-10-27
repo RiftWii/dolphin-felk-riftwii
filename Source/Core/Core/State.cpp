@@ -204,28 +204,63 @@ static void DoState(Core::System& system, PointerWrap& p)
 #endif  // USE_RETRO_ACHIEVEMENTS
 }
 
-void LoadFromBuffer(Core::System& system, std::vector<u8>& buffer)
+static bool CanLoadStateFromBuffer()
 {
   if (NetPlay::IsNetPlayRunning())
   {
     OSD::AddMessage("Loading savestates is disabled in Netplay to prevent desyncs");
-    return;
+    return false;
   }
 
   if (AchievementManager::GetInstance().IsHardcoreModeActive())
   {
     OSD::AddMessage("Loading savestates is disabled in RetroAchievements hardcore mode");
-    return;
+    return false;
   }
 
+  return true;
+}
+
+static bool ReadStateBuffer(Core::System& system, std::vector<u8>& buffer)
+{
+  u8* ptr = buffer.data();
+  PointerWrap p(&ptr, buffer.size(), PointerWrap::Mode::Read);
+  DoState(system, p);
+  return p.IsReadMode();
+}
+
+bool LoadFromBuffer(Core::System& system, std::vector<u8>& buffer)
+{
+  if (!CanLoadStateFromBuffer())
+    return false;
+
+  bool result = true;
   Core::RunOnCPUThread(
       system,
       [&] {
-        u8* ptr = buffer.data();
-        PointerWrap p(&ptr, buffer.size(), PointerWrap::Mode::Read);
+        std::vector<u8> backup;
+        u8* ptr = nullptr;
+        PointerWrap p_measure(&ptr, 0, PointerWrap::Mode::Measure);
+        DoState(system, p_measure);
+        const size_t buffer_size = reinterpret_cast<size_t>(ptr);
+        backup.resize(buffer_size);
+        ptr = backup.data();
+        PointerWrap p(&ptr, buffer_size, PointerWrap::Mode::Write);
         DoState(system, p);
+
+        if (!ReadStateBuffer(system, buffer))
+        {
+          Core::DisplayMessage("The savestate could not be loaded", OSD::Duration::NORMAL);
+          if (!ReadStateBuffer(system, backup))
+          {
+            PanicAlertFmt(
+                "The savestate could not be loaded, and the previous state could not be restored");
+          }
+          result = false;
+        }
       },
       true);
+  return result;
 }
 
 void SaveToBuffer(Core::System& system, std::vector<u8>& buffer)
@@ -1025,6 +1060,8 @@ void SaveFirstSaved(Core::System& system)
 // Load the last state before loading the state
 void UndoLoadState(Core::System& system)
 {
+  if (!CanLoadStateFromBuffer())
+    return;
   std::lock_guard lk(s_undo_load_buffer_mutex);
   if (!s_undo_load_buffer.empty())
   {
@@ -1034,7 +1071,7 @@ void UndoLoadState(Core::System& system)
       const std::string dtmpath = File::GetUserPath(D_STATESAVES_IDX) + "undo.dtm";
       if (File::Exists(dtmpath))
       {
-        LoadFromBuffer(system, s_undo_load_buffer);
+        Core::RunOnCPUThread(system, [&] { ReadStateBuffer(system, s_undo_load_buffer); }, true);
         movie.LoadInput(dtmpath);
       }
       else
@@ -1044,7 +1081,7 @@ void UndoLoadState(Core::System& system)
     }
     else
     {
-      LoadFromBuffer(system, s_undo_load_buffer);
+      Core::RunOnCPUThread(system, [&] { ReadStateBuffer(system, s_undo_load_buffer); }, true);
     }
   }
   else

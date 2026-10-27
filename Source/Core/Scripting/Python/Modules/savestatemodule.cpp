@@ -102,8 +102,7 @@ static PyObject* LoadFromBytes(PyObject* self, PyObject* args)
     return nullptr;
   // I don't understand where and why the buffer gets copied and why this is necessary...
   buffer.assign(data, data+length);
-  State::LoadFromBuffer(*state->system, buffer);
-  Py_RETURN_NONE;
+  return PyBool_FromLong(State::LoadFromBuffer(*state->system, buffer));
 }
 
 static void SetupSavestateModule(PyObject* module, SavestateModuleState* state)
