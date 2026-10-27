@@ -995,9 +995,37 @@ void EmulationKernel::DoState(PointerWrap& p)
   p.Do(m_reply_queue);
   p.Do(m_last_reply_time);
   p.Do(m_ipc_paused);
-  p.Do(m_title_id);
-  p.Do(m_d2x_base);
-  p.Do(m_d2x_revision);
+  // A d2x kernel has a different file system and device set from its base IOS, and a load
+  // doesn't rebuild them, so a state from a differently built kernel can't be read.
+  u64 title_id = m_title_id;
+  u32 d2x_base = m_d2x_base;
+  u16 d2x_revision = m_d2x_revision;
+  p.Do(title_id);
+  p.Do(d2x_base);
+  p.Do(d2x_revision);
+  if (p.IsReadMode() && (d2x_base != 0 || IsD2x()) &&
+      ((d2x_base != 0) != IsD2x() ||
+       GetFeatures(d2x_base != 0 ? d2x_base : static_cast<u32>(title_id)) !=
+           GetFeatures(GetVersion())))
+  {
+    const std::string saved_ios =
+        d2x_base != 0 ?
+            fmt::format("IOS{} (d2x base {})", static_cast<u32>(title_id), d2x_base) :
+            fmt::format("IOS{} (not d2x)", static_cast<u32>(title_id));
+    const std::string running_ios =
+        m_d2x_base != 0 ?
+            fmt::format("IOS{} (d2x base {})", static_cast<u32>(m_title_id), m_d2x_base) :
+            fmt::format("IOS{} (not d2x)", static_cast<u32>(m_title_id));
+    ERROR_LOG_FMT(IOS, "Savestate is from {}, but {} is running", saved_ios, running_ios);
+    Core::DisplayMessage(
+        "This savestate was saved under a different IOS (d2x or IOS features differ)", 4000);
+    // Keep the running IOS identity so Dolphin can undo the load with the same kernel.
+    p.SetMeasureMode();
+    return;
+  }
+  m_title_id = title_id;
+  m_d2x_base = d2x_base;
+  m_d2x_revision = d2x_revision;
   p.Do(m_ppc_uid);
   p.Do(m_ppc_gid);
 

@@ -180,7 +180,7 @@ void DVDInterface::DoState(PointerWrap& p)
       // Dolphin undoes the load, which also puts the recipe back.
       ERROR_LOG_FMT(DVDINTERFACE, "Failed to restore d2x disc from savestate: {}", error);
       Core::DisplayMessage(fmt::format("The d2x game could not be restored: {}", error), 4000);
-      p.SetVerifyMode();
+      p.SetMeasureMode();
       return;
     }
     m_disc_end_offset = GetDiscEndOffset(*disc);
