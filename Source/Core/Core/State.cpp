@@ -1060,8 +1060,6 @@ void SaveFirstSaved(Core::System& system)
 // Load the last state before loading the state
 void UndoLoadState(Core::System& system)
 {
-  if (!CanLoadStateFromBuffer())
-    return;
   std::lock_guard lk(s_undo_load_buffer_mutex);
   if (!s_undo_load_buffer.empty())
   {
@@ -1071,8 +1069,8 @@ void UndoLoadState(Core::System& system)
       const std::string dtmpath = File::GetUserPath(D_STATESAVES_IDX) + "undo.dtm";
       if (File::Exists(dtmpath))
       {
-        Core::RunOnCPUThread(system, [&] { ReadStateBuffer(system, s_undo_load_buffer); }, true);
-        movie.LoadInput(dtmpath);
+        if (LoadFromBuffer(system, s_undo_load_buffer))
+          movie.LoadInput(dtmpath);
       }
       else
       {
@@ -1081,7 +1079,7 @@ void UndoLoadState(Core::System& system)
     }
     else
     {
-      Core::RunOnCPUThread(system, [&] { ReadStateBuffer(system, s_undo_load_buffer); }, true);
+      LoadFromBuffer(system, s_undo_load_buffer);
     }
   }
   else
