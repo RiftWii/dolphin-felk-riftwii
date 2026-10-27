@@ -447,25 +447,25 @@ void D2xFileSystem::ApplyNandConfig(const NandConfig& config)
 
 namespace
 {
-D2xPendingNand s_pending_d2x_nand;
+D2xReloadCarry s_reload_carry;
 }  // namespace
 
-void SetNandConfigForNextIOSBoot(const D2xFileSystem::NandConfig& config)
+void SetReloadCarryForNextIOSBoot(const D2xReloadCarry& carry)
 {
-  s_pending_d2x_nand.has_value = true;
-  s_pending_d2x_nand.config = config;
+  s_reload_carry = carry;
+  s_reload_carry.has_value = true;
 }
 
-D2xPendingNand TakeNandConfigForNextIOSBoot()
+D2xReloadCarry TakeReloadCarryForNextIOSBoot()
 {
-  D2xPendingNand pending = s_pending_d2x_nand;
-  s_pending_d2x_nand = {};
-  return pending;
+  D2xReloadCarry carry = s_reload_carry;
+  s_reload_carry = {};
+  return carry;
 }
 
-D2xPendingNand& GetPendingNandConfigForNextIOSBoot()
+D2xReloadCarry& GetReloadCarryForNextIOSBoot()
 {
-  return s_pending_d2x_nand;
+  return s_reload_carry;
 }
 
 void D2xFileSystem::DoState(PointerWrap& p)

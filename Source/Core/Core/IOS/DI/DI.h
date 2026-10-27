@@ -45,6 +45,15 @@ public:
 
   void DoState(PointerWrap& p) override;
 
+  // d2x settings, read and restored when d2x's redirected IOS reload replaces this device.
+  bool HasD2xFragments() const { return m_d2x_fragments; }
+  bool IsD2xResetDisabled() const { return m_d2x_disable_reset; }
+  void RestoreD2xReloadState(bool fragments, bool disable_reset)
+  {
+    m_d2x_fragments = fragments;
+    m_d2x_disable_reset = disable_reset;
+  }
+
   std::optional<IPCReply> Open(const OpenRequest& request) override;
   std::optional<IPCReply> IOCtl(const IOCtlRequest& request) override;
   std::optional<IPCReply> IOCtlV(const IOCtlVRequest& request) override;

@@ -115,13 +115,16 @@ private:
   std::string m_nand_path;
 };
 
-// NAND emulation carried across d2x's redirected IOS reload.
-struct D2xPendingNand
+// State carried across d2x's redirected IOS reload: NAND emulation (when it was on) and the disc
+// device's fragment mode and no-reset setting.
+struct D2xReloadCarry
 {
   bool has_value = false;
-  D2xFileSystem::NandConfig config;
+  D2xFileSystem::NandConfig nand_config;
+  bool di_fragments = false;
+  bool di_disable_reset = false;
 };
-void SetNandConfigForNextIOSBoot(const D2xFileSystem::NandConfig& config);
-D2xPendingNand TakeNandConfigForNextIOSBoot();
-D2xPendingNand& GetPendingNandConfigForNextIOSBoot();
+void SetReloadCarryForNextIOSBoot(const D2xReloadCarry& carry);
+D2xReloadCarry TakeReloadCarryForNextIOSBoot();
+D2xReloadCarry& GetReloadCarryForNextIOSBoot();
 }  // namespace IOS::HLE::FS

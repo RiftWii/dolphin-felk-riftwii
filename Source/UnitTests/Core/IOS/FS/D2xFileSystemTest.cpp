@@ -301,22 +301,41 @@ TEST_F(D2xFileSystemTest, CarriedNandConfigAppliesWithoutMount)
   EXPECT_FALSE(m_real->GetMetadata(0, 0, path));
 }
 
-TEST(D2xPendingNandConfigTest, TakenOnce)
+TEST(D2xReloadCarryTest, TakenOnce)
 {
-  D2xFileSystem::NandConfig config;
-  config.mode = 0x101;
-  config.nand_path = "/nands/carry";
-  config.volume_mounted = {true, false};
-  config.volume_offsets = {123, 456};
-  SetNandConfigForNextIOSBoot(config);
-  const D2xPendingNand first = TakeNandConfigForNextIOSBoot();
+  D2xReloadCarry carry;
+  carry.nand_config.mode = 0x101;
+  carry.nand_config.nand_path = "/nands/carry";
+  carry.nand_config.volume_mounted = {true, false};
+  carry.nand_config.volume_offsets = {123, 456};
+  carry.di_fragments = true;
+  carry.di_disable_reset = true;
+  SetReloadCarryForNextIOSBoot(carry);
+  const D2xReloadCarry first = TakeReloadCarryForNextIOSBoot();
   EXPECT_TRUE(first.has_value);
-  EXPECT_EQ(first.config.mode, config.mode);
-  EXPECT_EQ(first.config.nand_path, config.nand_path);
-  EXPECT_EQ(first.config.volume_mounted, config.volume_mounted);
-  EXPECT_EQ(first.config.volume_offsets, config.volume_offsets);
-  const D2xPendingNand second = TakeNandConfigForNextIOSBoot();
+  EXPECT_EQ(first.nand_config.mode, carry.nand_config.mode);
+  EXPECT_EQ(first.nand_config.nand_path, carry.nand_config.nand_path);
+  EXPECT_EQ(first.nand_config.volume_mounted, carry.nand_config.volume_mounted);
+  EXPECT_EQ(first.nand_config.volume_offsets, carry.nand_config.volume_offsets);
+  EXPECT_TRUE(first.di_fragments);
+  EXPECT_TRUE(first.di_disable_reset);
+  const D2xReloadCarry second = TakeReloadCarryForNextIOSBoot();
   EXPECT_FALSE(second.has_value);
+  EXPECT_FALSE(second.di_fragments);
+  EXPECT_FALSE(second.di_disable_reset);
+}
+
+TEST(D2xReloadCarryTest, DiOnlyWithNandOff)
+{
+  D2xReloadCarry carry;
+  carry.di_disable_reset = true;
+  SetReloadCarryForNextIOSBoot(carry);
+  const D2xReloadCarry first = TakeReloadCarryForNextIOSBoot();
+  EXPECT_TRUE(first.has_value);
+  EXPECT_EQ(first.nand_config.mode, 0u);
+  EXPECT_FALSE(first.di_fragments);
+  EXPECT_TRUE(first.di_disable_reset);
+  EXPECT_FALSE(TakeReloadCarryForNextIOSBoot().has_value);
 }
 
 TEST_F(D2xFileSystemTest, RenameDoesNotRetargetHandlesFromAnotherNandFolder)

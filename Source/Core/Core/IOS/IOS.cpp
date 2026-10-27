@@ -31,6 +31,7 @@
 #include "Core/ConfigManager.h"
 #include "Core/Core.h"
 #include "Core/CoreTiming.h"
+#include "Core/HW/DVD/DVDInterface.h"
 #include "Core/HW/Memmap.h"
 #include "Core/HW/WII_IPC.h"
 #include "Core/IOS/Crypto/AesDevice.h"
@@ -380,7 +381,8 @@ bool HasD2xSlot(FS::FileSystem& fs, u64 ios_title_id)
 EmulationKernel::EmulationKernel(Core::System& system, u64 title_id)
     : Kernel(title_id), m_system(system)
 {
-  auto pending_d2x_nand = FS::TakeNandConfigForNextIOSBoot();
+  const auto d2x_carry = FS::TakeReloadCarryForNextIOSBoot();
+  const bool carry_nand = d2x_carry.has_value && (d2x_carry.nand_config.mode & 3) != 0;
   INFO_LOG_FMT(IOS, "Starting IOS {:016x}", title_id);
 
   if (title_id != Titles::MIOS)
@@ -405,8 +407,8 @@ EmulationKernel::EmulationKernel(Core::System& system, u64 title_id)
           const u8 system_code = m_system.GetMemory().Read_U8(0);
           return system_code == 'R' || system_code == 'S';
         });
-    if (pending_d2x_nand.has_value)
-      m_d2x_fs->ApplyNandConfig(pending_d2x_nand.config);
+    if (carry_nand)
+      m_d2x_fs->ApplyNandConfig(d2x_carry.nand_config);
     m_fs = m_d2x_fs;
     NOTICE_LOG_FMT(IOS, "IOS{} is d2x on base IOS{}, revision {}", static_cast<u32>(title_id),
                    d2x->base, d2x->revision);
@@ -426,18 +428,30 @@ EmulationKernel::EmulationKernel(Core::System& system, u64 title_id)
   AddDevice(std::make_unique<ShaDevice>(*this, "/dev/sha"));
 
   m_fs_core = std::make_unique<FSCore>(*this);
-  if (d2x && pending_d2x_nand.has_value)
+  if (d2x && carry_nand)
   {
-    m_fs_core->SetD2xNandEmulation(pending_d2x_nand.config.mode,
-                                   pending_d2x_nand.config.nand_path);
+    m_fs_core->SetD2xNandEmulation(d2x_carry.nand_config.mode, d2x_carry.nand_config.nand_path);
     NOTICE_LOG_FMT(IOS, "d2x: restored NAND emulation mode {:#x}, folder \"{}\"",
-                   pending_d2x_nand.config.mode, pending_d2x_nand.config.nand_path);
+                   d2x_carry.nand_config.mode, d2x_carry.nand_config.nand_path);
   }
   AddDevice(std::make_unique<FSDevice>(*this, *m_fs_core, "/dev/fs"));
   m_es_core = std::make_unique<ESCore>(*this);
   AddDevice(std::make_unique<ESDevice>(*this, *m_es_core, "/dev/es"));
 
   AddStaticDevices();
+
+  if (d2x && (d2x_carry.di_fragments || d2x_carry.di_disable_reset))
+  {
+    if (const auto device = GetDeviceByName("/dev/di"))
+    {
+      // The disc device only keeps the fragment mode if the virtual disc is still there.
+      const bool fragments = d2x_carry.di_fragments && m_system.GetDVDInterface().HasD2xDisc();
+      std::static_pointer_cast<DIDevice>(device)->RestoreD2xReloadState(
+          fragments, d2x_carry.di_disable_reset);
+      NOTICE_LOG_FMT(IOS, "d2x: restored disc fragment mode {}, no-reset setting {}", fragments,
+                     d2x_carry.di_disable_reset);
+    }
+  }
 }
 
 EmulationKernel::~EmulationKernel()

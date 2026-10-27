@@ -24,6 +24,7 @@
 #include "Core/Core.h"
 #include "Core/CoreTiming.h"
 #include "Core/HW/Memmap.h"
+#include "Core/IOS/DI/DI.h"
 #include "Core/IOS/ES/Formats.h"
 #include "Core/IOS/FS/D2xFileSystem.h"
 #include "Core/IOS/FS/FileSystem.h"
@@ -547,14 +548,16 @@ void ESDevice::DoState(PointerWrap& p)
   p.Do(m_pending_ppc_boot_content_path);
   // d2x's ES settings outlive this instance, but a savestate restores them too.
   p.Do(s_d2x);
-  auto& pending_d2x_nand = FS::GetPendingNandConfigForNextIOSBoot();
-  p.Do(pending_d2x_nand.has_value);
-  p.Do(pending_d2x_nand.config.mode);
-  p.Do(pending_d2x_nand.config.nand_path);
-  p.Do(pending_d2x_nand.config.volume_mounted[0]);
-  p.Do(pending_d2x_nand.config.volume_mounted[1]);
-  p.Do(pending_d2x_nand.config.volume_offsets[0]);
-  p.Do(pending_d2x_nand.config.volume_offsets[1]);
+  auto& d2x_carry = FS::GetReloadCarryForNextIOSBoot();
+  p.Do(d2x_carry.has_value);
+  p.Do(d2x_carry.nand_config.mode);
+  p.Do(d2x_carry.nand_config.nand_path);
+  p.Do(d2x_carry.nand_config.volume_mounted[0]);
+  p.Do(d2x_carry.nand_config.volume_mounted[1]);
+  p.Do(d2x_carry.nand_config.volume_offsets[0]);
+  p.Do(d2x_carry.nand_config.volume_offsets[1]);
+  p.Do(d2x_carry.di_fragments);
+  p.Do(d2x_carry.di_disable_reset);
 }
 
 ESDevice::ContextArray::iterator ESDevice::FindActiveContext(s32 fd)
@@ -806,7 +809,7 @@ std::optional<IPCReply> ESDevice::Launch(const IOCtlVRequest& request)
   // Prevent loading installed IOSes that are not emulated.
   if (!IsEmulatedOrD2xSlot(title_id))
   {
-    FS::TakeNandConfigForNextIOSBoot();
+    FS::TakeReloadCarryForNextIOSBoot();
     return IPCReply(FS_ENOENT);
   }
 
@@ -814,7 +817,7 @@ std::optional<IPCReply> ESDevice::Launch(const IOCtlVRequest& request)
   // Note: Launch will potentially reset the whole IOS state -- including this ES instance.
   if (!LaunchTitle(title_id))
   {
-    FS::TakeNandConfigForNextIOSBoot();
+    FS::TakeReloadCarryForNextIOSBoot();
     return IPCReply(FS_ENOENT);
   }
 
@@ -922,13 +925,27 @@ u64 ESDevice::D2xLaunchTarget(u64 title_id)
   if (m_core.m_title_context.active && IsDiscGame(m_core.m_title_context.tmd.GetTitleId()))
   {
     s_d2x.game_title_id = m_core.m_title_context.tmd.GetTitleId();
+    FS::D2xReloadCarry carry;
     const auto config = GetEmulationKernel().GetD2xFS()->GetNandConfig();
     if ((config.mode & 3) != 0)
     {
-      FS::SetNandConfigForNextIOSBoot(config);
+      carry.nand_config = config;
       NOTICE_LOG_FMT(IOS_ES, "d2x: carrying NAND emulation mode {:#x}, folder \"{}\"",
                      config.mode, config.nand_path);
     }
+    if (const auto di_device = GetEmulationKernel().GetDeviceByName("/dev/di"))
+    {
+      const auto di = std::static_pointer_cast<DIDevice>(di_device);
+      carry.di_fragments = di->HasD2xFragments();
+      carry.di_disable_reset = di->IsD2xResetDisabled();
+      if (carry.di_fragments || carry.di_disable_reset)
+      {
+        NOTICE_LOG_FMT(IOS_ES, "d2x: carrying disc fragment mode {}, no-reset setting {}",
+                       carry.di_fragments, carry.di_disable_reset);
+      }
+    }
+    if ((config.mode & 3) != 0 || carry.di_fragments || carry.di_disable_reset)
+      FS::SetReloadCarryForNextIOSBoot(carry);
     NOTICE_LOG_FMT(IOS_ES, "d2x: {:016x} asked for IOS{}; restarting IOS{} in its place",
                    s_d2x.game_title_id, ios, s_d2x.ios);
     return Titles::IOS(s_d2x.ios);

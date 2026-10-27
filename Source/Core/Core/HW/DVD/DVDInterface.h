@@ -142,6 +142,7 @@ public:
                std::optional<std::vector<std::string>> auto_disc_change_paths);
   s32 SetD2xDisc(u32 device, std::vector<u8> fragment_list, std::string* error,
                  u64* disc_size = nullptr);
+  bool HasD2xDisc() const { return !m_d2x_fragment_list.empty(); }
   bool IsDiscInside() const;
   void EjectDisc(const Core::CPUThreadGuard& guard, EjectCause cause);
   void ChangeDisc(const Core::CPUThreadGuard& guard, const std::vector<std::string>& paths);
