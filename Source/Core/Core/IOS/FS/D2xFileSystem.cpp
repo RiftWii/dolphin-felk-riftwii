@@ -7,6 +7,8 @@
 #include <string_view>
 #include <utility>
 
+#include <fmt/format.h>
+
 // Does not compile if diskio.h is included first.
 // clang-format off
 #include "ff.h"
@@ -16,9 +18,11 @@
 #include "Common/ChunkFile.h"
 #include "Common/FatFsUtil.h"
 #include "Common/FileUtil.h"
+#include "Common/Hash.h"
 #include "Common/IOFile.h"
 #include "Common/Logging/Log.h"
 #include "Core/Config/MainSettings.h"
+#include "Core/Core.h"
 #include "Core/IOS/Device.h"
 #include "Core/IOS/USB/USBStorage.h"
 
@@ -103,6 +107,66 @@ bool IsImageAvailable(Drive drive)
 {
   return drive == Drive::USB ? USB::StorageImage(GetImagePath(drive)).GetSectorCount() != 0 :
                                Config::Get(Config::MAIN_WII_SD_CARD);
+}
+
+struct ImageIdentity
+{
+  bool readable = false;
+  std::string path;
+  u64 size = 0;
+  u32 boot_hash = 0;
+
+  bool operator==(const ImageIdentity&) const = default;
+};
+
+ImageIdentity ReadImageIdentity(Drive drive, u32 partition_offset)
+{
+  ImageIdentity identity;
+  identity.path = GetImagePath(drive);
+  if (!IsImageAvailable(drive))
+    return identity;
+
+  File::IOFile image(identity.path, "rb", File::SharedAccess::ReadWrite);
+  if (!image)
+    return identity;
+  identity.size = image.GetSize();
+  std::array<u8, 512> sector{};
+  if (identity.size < sector.size() || !image.ReadArray(&sector))
+    return identity;
+
+  // Boot sectors contain the volume serial and geometry. Exclude mutable FAT,
+  // FSInfo and file data so ordinary save writes do not invalidate a state.
+  identity.boot_hash = Common::ComputeCRC32(sector.data(), sector.size());
+  std::array<u32, 4> boot_sectors{partition_offset};
+  const auto has_fat_signature = [&](size_t offset) {
+    return std::string_view(reinterpret_cast<const char*>(sector.data() + offset), 3) == "FAT";
+  };
+  if (partition_offset == 0 && !has_fat_signature(54) && !has_fat_signature(82) &&
+      sector[510] == 0x55 && sector[511] == 0xaa)
+  {
+    // With automatic partition selection, FatFs finds the volume inside the
+    // image itself. Include its boot sector even though our offset remains zero.
+    for (size_t partition = 0; partition < boot_sectors.size(); ++partition)
+    {
+      const size_t entry = 446 + partition * 16;
+      if (sector[entry + 4] == 0)
+        continue;
+      for (size_t byte = 0; byte < 4; ++byte)
+        boot_sectors[partition] |= static_cast<u32>(sector[entry + 8 + byte]) << (byte * 8);
+    }
+  }
+  for (const u32 boot_sector : boot_sectors)
+  {
+    if (boot_sector == 0)
+      continue;
+    const u64 boot_offset = static_cast<u64>(boot_sector) * sector.size();
+    if (boot_offset > identity.size - sector.size() ||
+        !image.Seek(boot_offset, File::SeekOrigin::Begin) || !image.ReadArray(&sector))
+      return identity;
+    identity.boot_hash = Common::UpdateCRC32(identity.boot_hash, sector.data(), sector.size());
+  }
+  identity.readable = true;
+  return identity;
 }
 
 class CardCallbacks final : public Common::FatFsCallbacks
@@ -470,12 +534,56 @@ D2xReloadCarry& GetReloadCarryForNextIOSBoot()
 
 void D2xFileSystem::DoState(PointerWrap& p)
 {
-  m_real_fs->DoState(p);
-  for (auto& volume : m_volumes)
+  // Validate both drives before replacing any live filesystem state, including
+  // the real NAND backend. A refused load must leave it available for undo.
+  auto volumes = m_volumes;
+  for (size_t i = 0; i < volumes.size(); ++i)
   {
+    auto& volume = volumes[i];
+    const Drive drive = static_cast<Drive>(i);
+    bool needs_image = volume.mounted || ((m_mode & 3) && RedirectDrive() == drive) ||
+                       std::ranges::any_of(m_handles, [drive](const Handle& handle) {
+                         return handle.opened && handle.drive == drive;
+                       });
     p.Do(volume.mounted);
     p.Do(volume.partition_offset);
+    p.Do(needs_image);
+    if (!needs_image)
+      continue;
+
+    ImageIdentity identity;
+    identity.path = GetImagePath(drive);
+    if ((p.IsWriteMode() || p.IsVerifyMode()) && (drive == Drive::USB || m_flush_card()))
+      identity = ReadImageIdentity(drive, volume.partition_offset);
+    p.Do(identity.readable);
+    p.Do(identity.path);
+    p.Do(identity.size);
+    p.Do(identity.boot_hash);
+
+    if (p.IsReadMode())
+    {
+      ImageIdentity current;
+      if (drive == Drive::USB || m_flush_card())
+        current = ReadImageIdentity(drive, volume.partition_offset);
+      if (!identity.readable || !current.readable || identity != current)
+      {
+        const char* drive_name = drive == Drive::USB ? "USB" : "SD";
+        ERROR_LOG_FMT(IOS_FS,
+                      "Cannot restore d2x filesystem: the {} image is missing or changed ({})",
+                      drive_name, identity.path);
+        Core::DisplayMessage(
+            fmt::format("This savestate cannot be loaded because the d2x {} image is missing or "
+                        "has changed",
+                        drive_name),
+            4000);
+        p.SetMeasureMode();
+        return;
+      }
+    }
   }
+  m_real_fs->DoState(p);
+  if (p.IsReadMode())
+    m_volumes = volumes;
   p.Do(m_mode);
   p.Do(m_nand_path);
   for (auto& handle : m_handles)
@@ -553,24 +661,27 @@ Result<u32> D2xFileSystem::Transfer(Fd fd, Mode access, u8* read_buffer, const u
     return ResultCode::Invalid;
   const bool writing = access == Mode::Write;
   u32 transferred = 0;
-  const auto result = Run(writing ? "Write" : "Read", handle->path, [&] {
-    if (!(static_cast<u8>(handle->mode) & static_cast<u8>(access)))
-      return static_cast<int>(FR_DENIED);
-    FIL file{};
-    int status = f_open(&file, handle->fat_path.c_str(), static_cast<BYTE>(handle->mode));
-    if (status != FR_OK)
-      return status;
-    status = f_lseek(&file, handle->offset);
-    if (status == FR_OK)
-    {
-      if (writing)
-        status = f_write(&file, write_buffer, size, &transferred);
-      else
-        status = f_read(&file, read_buffer, size, &transferred);
-    }
-    const int close_status = f_close(&file);
-    return status == FR_OK ? close_status : status;
-  }, handle->drive);
+  const auto result = Run(
+      writing ? "Write" : "Read", handle->path,
+      [&] {
+        if (!(static_cast<u8>(handle->mode) & static_cast<u8>(access)))
+          return static_cast<int>(FR_DENIED);
+        FIL file{};
+        int status = f_open(&file, handle->fat_path.c_str(), static_cast<BYTE>(handle->mode));
+        if (status != FR_OK)
+          return status;
+        status = f_lseek(&file, handle->offset);
+        if (status == FR_OK)
+        {
+          if (writing)
+            status = f_write(&file, write_buffer, size, &transferred);
+          else
+            status = f_read(&file, read_buffer, size, &transferred);
+        }
+        const int close_status = f_close(&file);
+        return status == FR_OK ? close_status : status;
+      },
+      handle->drive);
   if (result != ResultCode::Success)
     return result;
   handle->offset += transferred;
@@ -599,9 +710,9 @@ Result<FileStatus> D2xFileSystem::GetFileStatus(Fd fd)
   if (!handle)
     return ResultCode::Invalid;
   FILINFO info{};
-  const auto result =
-      Run("FileStats", handle->path, [&] { return f_stat(handle->fat_path.c_str(), &info); },
-          handle->drive);
+  const auto result = Run(
+      "FileStats", handle->path, [&] { return f_stat(handle->fat_path.c_str(), &info); },
+      handle->drive);
   if (result != ResultCode::Success)
     return result;
   return FileStatus{handle->offset, static_cast<u32>(info.fsize)};

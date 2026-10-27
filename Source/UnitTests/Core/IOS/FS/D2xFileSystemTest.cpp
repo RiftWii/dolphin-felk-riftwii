@@ -55,6 +55,43 @@ protected:
       File::DeleteDirRecursively(m_directory);
   }
 
+  std::vector<u8> SaveState()
+  {
+    u8* cursor = nullptr;
+    PointerWrap measure(&cursor, 0, PointerWrap::Mode::Measure);
+    m_fs->DoState(measure);
+    std::vector<u8> state(reinterpret_cast<size_t>(cursor));
+    cursor = state.data();
+    PointerWrap writer(&cursor, state.size(), PointerWrap::Mode::Write);
+    m_fs->DoState(writer);
+    EXPECT_TRUE(writer.IsWriteMode());
+    EXPECT_EQ(cursor, state.data() + state.size());
+    return state;
+  }
+
+  bool LoadState(std::vector<u8>& state)
+  {
+    u8* cursor = state.data();
+    PointerWrap reader(&cursor, state.size(), PointerWrap::Mode::Read);
+    m_fs->DoState(reader);
+    return reader.IsReadMode();
+  }
+
+  void ChangeImageSerial(const std::string& path, u32 boot_sector = 0)
+  {
+    File::IOFile image(path, "r+b");
+    ASSERT_TRUE(image);
+    // SDCardCreate makes FAT32 images, whose volume serial starts at 0x43.
+    const u64 serial_offset = static_cast<u64>(boot_sector) * 512 + 0x43;
+    u8 serial_byte = 0;
+    ASSERT_TRUE(image.Seek(serial_offset, File::SeekOrigin::Begin));
+    ASSERT_TRUE(image.ReadBytes(&serial_byte, 1));
+    serial_byte ^= 0xff;
+    ASSERT_TRUE(image.Seek(serial_offset, File::SeekOrigin::Begin));
+    ASSERT_TRUE(image.WriteBytes(&serial_byte, 1));
+    ASSERT_TRUE(image.Close());
+  }
+
   std::string m_directory;
   std::string m_image;
   std::string m_original_image;
@@ -223,6 +260,7 @@ TEST_F(D2xFileSystemTest, SavestateRestoresRoutingAndHandleOffsets)
   cursor = state.data();
   PointerWrap reader(&cursor, state.size(), PointerWrap::Mode::Read);
   m_fs->DoState(reader);
+  ASSERT_TRUE(reader.IsReadMode());
   EXPECT_TRUE(m_fs->IsEmulated("/title/test"));
   ASSERT_TRUE(m_fs->GetFileStatus(fd));
   EXPECT_EQ(m_fs->GetFileStatus(fd)->offset, 3u);
@@ -231,6 +269,153 @@ TEST_F(D2xFileSystemTest, SavestateRestoresRoutingAndHandleOffsets)
   ASSERT_TRUE(m_fs->ReadBytesFromFile(fd, read.data(), static_cast<u32>(read.size())));
   EXPECT_EQ(read, bytes);
   EXPECT_EQ(m_fs->Close(fd), ResultCode::Success);
+}
+
+TEST_F(D2xFileSystemTest, SavestateRejectsChangedImagePath)
+{
+  auto state = SaveState();
+  const std::string replacement = m_directory + "/replacement.raw";
+  ASSERT_TRUE(File::CopyRegularFile(m_image, replacement));
+  File::SetUserPath(F_WIISDCARDIMAGE_IDX, replacement);
+  EXPECT_FALSE(LoadState(state));
+}
+
+TEST_F(D2xFileSystemTest, SavestateRejectsMissingImage)
+{
+  auto state = SaveState();
+  ASSERT_TRUE(File::Delete(m_image));
+  EXPECT_FALSE(LoadState(state));
+}
+
+TEST_F(D2xFileSystemTest, SavestateRejectsResizedImage)
+{
+  auto state = SaveState();
+  File::IOFile image(m_image, "r+b");
+  ASSERT_TRUE(image);
+  ASSERT_TRUE(image.Resize(image.GetSize() + 512));
+  ASSERT_TRUE(image.Close());
+  EXPECT_FALSE(LoadState(state));
+}
+
+TEST_F(D2xFileSystemTest, SavestateRejectionPreservesLiveFilesystemState)
+{
+  ASSERT_EQ(m_fs->CreateFile(0, 0, "/title/test", 0, modes), ResultCode::Success);
+  auto file = m_fs->OpenFile(0, 0, "/title/test", Mode::ReadWrite);
+  ASSERT_TRUE(file);
+  const Fd fd = file->Release();
+  auto state = SaveState();
+
+  ASSERT_EQ(m_fs->Close(fd), ResultCode::Success);
+  ASSERT_EQ(m_fs->SetMode(0, ""), 0);
+  m_fs->Unmount();
+  const auto config = m_fs->GetNandConfig();
+  ASSERT_EQ(m_real->CreateDirectory(0, 0, "/tmp", 0, modes), ResultCode::Success);
+  ASSERT_EQ(m_real->CreateFile(0, 0, "/tmp/live", 0, modes), ResultCode::Success);
+  ChangeImageSerial(m_image);
+
+  EXPECT_FALSE(LoadState(state));
+  const auto after = m_fs->GetNandConfig();
+  EXPECT_EQ(after.mode, config.mode);
+  EXPECT_EQ(after.nand_path, config.nand_path);
+  EXPECT_EQ(after.volume_mounted, config.volume_mounted);
+  EXPECT_EQ(after.volume_offsets, config.volume_offsets);
+  EXPECT_FALSE(m_fs->GetFileStatus(fd));
+  // Restoring the real NAND backend would have replaced /tmp with the saved copy.
+  EXPECT_TRUE(m_real->GetMetadata(0, 0, "/tmp/live"));
+}
+
+TEST_F(D2xFileSystemTest, SavestateChecksBothMountedImages)
+{
+  const std::string usb_image = m_directory + "/usb.raw";
+  ASSERT_TRUE(Common::SDCardCreate(128, usb_image));
+  Config::SetCurrent(Config::MAIN_WII_USB_IMAGE_PATH, usb_image);
+  ASSERT_EQ(m_fs->Mount(-1, true), 0);
+  auto state = SaveState();
+  ASSERT_EQ(m_fs->SetMode(0, ""), 0);
+  ChangeImageSerial(usb_image);
+
+  EXPECT_FALSE(LoadState(state));
+  EXPECT_EQ(m_fs->GetNandConfig().mode, 0u);
+}
+
+TEST_F(D2xFileSystemTest, SavestateChecksAutomaticallySelectedPartitionBootSector)
+{
+  // Only the boot sectors are needed to exercise identity checking; no FAT
+  // request is made against this synthetic partition layout.
+  File::IOFile image(m_image, "r+b");
+  ASSERT_TRUE(image);
+  std::array<u8, 512> boot{};
+  ASSERT_TRUE(image.ReadArray(&boot));
+  ASSERT_TRUE(image.Seek(64 * 512, File::SeekOrigin::Begin));
+  ASSERT_TRUE(image.WriteArray(boot));
+  std::array<u8, 512> mbr{};
+  mbr[446 + 4] = 0x0c;
+  mbr[446 + 8] = 64;
+  mbr[510] = 0x55;
+  mbr[511] = 0xaa;
+  ASSERT_TRUE(image.Seek(0, File::SeekOrigin::Begin));
+  ASSERT_TRUE(image.WriteArray(mbr));
+  ASSERT_TRUE(image.Close());
+  auto state = SaveState();
+  ChangeImageSerial(m_image, 64);
+  EXPECT_FALSE(LoadState(state));
+}
+
+TEST_F(D2xFileSystemTest, SavestateChecksExplicitlySelectedPartitionBootSector)
+{
+  File::IOFile image(m_image, "r+b");
+  ASSERT_TRUE(image);
+  std::array<u8, 512> boot{};
+  ASSERT_TRUE(image.ReadArray(&boot));
+  ASSERT_TRUE(image.Seek(64 * 512, File::SeekOrigin::Begin));
+  ASSERT_TRUE(image.WriteArray(boot));
+  ASSERT_TRUE(image.Close());
+  auto config = m_fs->GetNandConfig();
+  config.volume_offsets[0] = 64;
+  m_fs->ApplyNandConfig(config);
+  auto state = SaveState();
+  ChangeImageSerial(m_image, 64);
+  EXPECT_FALSE(LoadState(state));
+}
+
+TEST_F(D2xFileSystemTest, SavestateChecksUnmountedImageWithOpenHandle)
+{
+  ASSERT_EQ(m_fs->CreateFile(0, 0, "/title/test", 0, modes), ResultCode::Success);
+  const auto file = m_fs->OpenFile(0, 0, "/title/test", Mode::ReadWrite);
+  ASSERT_TRUE(file);
+  ASSERT_EQ(m_fs->SetMode(0, ""), 0);
+  m_fs->Unmount();
+  auto state = SaveState();
+  ChangeImageSerial(m_image);
+  EXPECT_FALSE(LoadState(state));
+}
+
+TEST_F(D2xFileSystemTest, SavestateDoesNotRequireUnusedImages)
+{
+  ASSERT_EQ(m_fs->SetMode(0, ""), 0);
+  m_fs->Unmount();
+  auto state = SaveState();
+  ASSERT_TRUE(File::Delete(m_image));
+  EXPECT_TRUE(LoadState(state));
+  EXPECT_EQ(m_fs->GetNandConfig().mode, 0u);
+  EXPECT_FALSE(m_fs->GetNandConfig().volume_mounted[0]);
+}
+
+TEST_F(D2xFileSystemTest, SavestateAcceptsOrdinaryImageWrites)
+{
+  ASSERT_EQ(m_fs->CreateFile(0, 0, "/title/test", 0, modes), ResultCode::Success);
+  const auto file = m_fs->OpenFile(0, 0, "/title/test", Mode::ReadWrite);
+  ASSERT_TRUE(file);
+  auto state = SaveState();
+  const std::array<u8, 3> bytes{7, 8, 9};
+  ASSERT_TRUE(file->Write(bytes.data(), bytes.size()));
+  ASSERT_EQ(m_fs->CreateFile(0, 0, "/title/another", 0, modes), ResultCode::Success);
+
+  ASSERT_TRUE(LoadState(state));
+  EXPECT_EQ(file->GetStatus()->offset, 0u);
+  std::array<u8, 3> read{};
+  ASSERT_TRUE(file->Read(read.data(), read.size()));
+  EXPECT_EQ(read, bytes);
 }
 
 // The NAND emulation stays on the drive its mode names: mounting the USB drive,

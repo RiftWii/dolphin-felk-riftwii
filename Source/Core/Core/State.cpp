@@ -98,7 +98,7 @@ static size_t s_state_writes_in_queue;
 static std::condition_variable s_state_write_queue_is_empty;
 
 // Don't forget to increase this after doing changes on the savestate system
-constexpr u32 STATE_VERSION = 175;  // Last changed by RiftWii's d2x emulation (RIFTWII-D2X.md)
+constexpr u32 STATE_VERSION = 176;  // Last changed by RiftWii's d2x emulation (RIFTWII-D2X.md)
 
 // Increase this if the StateExtendedHeader definition changes
 constexpr u32 EXTENDED_HEADER_VERSION = 1;  // Last changed in PR 12217
@@ -876,17 +876,19 @@ void LoadAs(Core::System& system, const std::string& filename)
   Core::RunOnCPUThread(
       system,
       [&] {
-        // Save temp buffer for undo load state
+        // Every attempted load needs an undo snapshot, including refused d2x loads.
         auto& movie = system.GetMovie();
-        if (!movie.IsJustStartingRecordingInputFromSaveState())
         {
           std::lock_guard lk2(s_undo_load_buffer_mutex);
           SaveToBuffer(system, s_undo_load_buffer);
-          const std::string dtmpath = File::GetUserPath(D_STATESAVES_IDX) + "undo.dtm";
-          if (movie.IsMovieActive())
-            movie.SaveRecording(dtmpath);
-          else if (File::Exists(dtmpath))
-            File::Delete(dtmpath);
+          if (!movie.IsJustStartingRecordingInputFromSaveState())
+          {
+            const std::string dtmpath = File::GetUserPath(D_STATESAVES_IDX) + "undo.dtm";
+            if (movie.IsMovieActive())
+              movie.SaveRecording(dtmpath);
+            else if (File::Exists(dtmpath))
+              File::Delete(dtmpath);
+          }
         }
 
         bool loaded = false;
