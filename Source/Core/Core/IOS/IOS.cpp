@@ -1176,6 +1176,9 @@ void Shutdown(Core::System& system)
 {
   system.SetIOS(nullptr);
   ESDevice::FinalizeEmulationState();
+  // A redirected reload that never booted (Stop during its boot delay) must not carry d2x's
+  // state into the next session.
+  FS::TakeReloadCarryForNextIOSBoot();
 }
 
 // Based on a hardware test, a device takes at least ~2700 ticks to reply to an IPC request.
