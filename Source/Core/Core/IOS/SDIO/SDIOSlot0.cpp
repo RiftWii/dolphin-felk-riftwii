@@ -89,11 +89,13 @@ void SDIOSlot0Device::EventNotify()
 
 void SDIOSlot0Device::OpenInternal()
 {
-  // A d2x disc read from the card keeps the image open across IOS reloads, also into a stock
-  // IOS, so share it whenever one is inserted.
-  const bool share = GetEmulationKernel().IsD2x() || GetSystem().GetDVDInterface().HasD2xDisc();
+  // d2x's NAND emulation and its disc reader open the image too. The disc reader keeps it open
+  // across IOS reloads, also into a stock IOS, and a savestate load can open either one first,
+  // so the card is always opened shared.
+  const bool other_handles =
+      GetEmulationKernel().IsD2x() || GetSystem().GetDVDInterface().HasD2xDisc();
   const std::string filename = File::GetUserPath(F_WIISDCARDIMAGE_IDX);
-  const auto shared_access = share ? File::SharedAccess::ReadWrite : File::SharedAccess::Default;
+  constexpr auto shared_access = File::SharedAccess::ReadWrite;
   m_card.Open(filename, "r+b", shared_access);
   if (!m_card)
   {
@@ -111,7 +113,7 @@ void SDIOSlot0Device::OpenInternal()
   }
   // d2x (and its disc reader) use other host handles. Disable read-ahead and
   // deferred writes here so sector access observes those requests immediately.
-  if (m_card.IsOpen() && share)
+  if (m_card.IsOpen() && other_handles)
     std::setvbuf(m_card.GetHandle(), nullptr, _IONBF, 0);
 }
 
