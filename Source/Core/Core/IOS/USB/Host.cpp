@@ -79,7 +79,7 @@ void USBHost::DoState(PointerWrap& p)
       {
         // Consume the absent drive's state without carrying its command into a future insertion.
         USB::MassStorage disconnected_storage(GetEmulationKernel());
-        disconnected_storage.DoState(p);
+        disconnected_storage.DoState(p, false);
       }
     }
     else if (p.IsReadMode() && has_storage)

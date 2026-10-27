@@ -14,7 +14,7 @@ public:
   static constexpr u64 DEVICE_ID = 0xd01f120000000001;
 
   explicit MassStorage(EmulationKernel& ios);
-  void DoState(PointerWrap& p);
+  void DoState(PointerWrap& p, bool check_image = true);
   void Reset();
   DeviceDescriptor GetDeviceDescriptor() const override;
   std::vector<ConfigDescriptor> GetConfigurations() const override;

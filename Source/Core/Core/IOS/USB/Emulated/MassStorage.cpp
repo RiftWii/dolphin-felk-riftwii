@@ -22,9 +22,9 @@ MassStorage::MassStorage(EmulationKernel& ios)
   m_id = DEVICE_ID;
 }
 
-void MassStorage::DoState(PointerWrap& p)
+void MassStorage::DoState(PointerWrap& p, bool check_image)
 {
-  m_transport.DoState(p);
+  m_transport.DoState(p, check_image);
   p.Do(m_configuration);
 }
 

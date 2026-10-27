@@ -10,9 +10,12 @@
 #include <utility>
 
 #include "Common/ChunkFile.h"
+#include "Common/Hash.h"
 #include "Common/IOFile.h"
+#include "Common/Logging/Log.h"
 #include "Common/Swap.h"
 #include "Core/Config/MainSettings.h"
+#include "Core/Core.h"
 
 namespace IOS::HLE::USB
 {
@@ -72,13 +75,56 @@ bool StorageImage::Write(u32 sector, std::span<const u8> data) const
          image.WriteBytes(data.data(), data.size()) && image.Flush();
 }
 
+StorageImage::Identity StorageImage::GetIdentity() const
+{
+  Identity identity;
+  identity.path = m_path;
+  File::IOFile image(m_path, "rb", File::SharedAccess::ReadWrite);
+  if (!image)
+    return identity;
+  identity.size = image.GetSize();
+  std::array<u8, SECTOR_SIZE> sector{};
+  if (identity.size < sector.size() || !image.ReadBytes(sector.data(), sector.size()))
+    return identity;
+  // Fingerprint sector 0 and the first sector of each MBR partition, so an
+  // image with the same size but different contents is still noticed.
+  identity.fingerprint = Common::ComputeCRC32(sector.data(), sector.size());
+  for (size_t partition = 0; partition < 4; ++partition)
+  {
+    const size_t entry = 446 + partition * 16;
+    if (sector[entry + 4] == 0)
+      continue;
+    const u32 lba = ReadLE32(sector.data() + entry + 8);
+    const u64 offset = u64{lba} * SECTOR_SIZE;
+    if (lba == 0 || offset > identity.size - sector.size())
+      continue;
+    std::array<u8, SECTOR_SIZE> boot{};
+    if (!image.Seek(offset, File::SeekOrigin::Begin) ||
+        !image.ReadBytes(boot.data(), boot.size()))
+    {
+      continue;
+    }
+    identity.fingerprint = Common::UpdateCRC32(identity.fingerprint, boot.data(), boot.size());
+  }
+  identity.readable = true;
+  return identity;
+}
+
 StorageTransport::StorageTransport(StorageImage image) : m_image(std::move(image))
 {
 }
 
-void StorageTransport::DoState(PointerWrap& p)
+void StorageTransport::DoState(PointerWrap& p, bool check_image)
 {
   // The image stays on disk; only the in-flight command belongs in the state.
+  // The identity records which image the command was started against.
+  StorageImage::Identity saved;
+  if (!p.IsReadMode())
+    saved = m_image.GetIdentity();
+  p.Do(saved.readable);
+  p.Do(saved.path);
+  p.Do(saved.size);
+  p.Do(saved.fingerprint);
   p.Do(m_phase);
   p.Do(m_data);
   p.Do(m_offset);
@@ -89,6 +135,25 @@ void StorageTransport::DoState(PointerWrap& p)
   p.Do(m_status);
   p.Do(m_sense_key);
   p.Do(m_additional_sense);
+  if (!p.IsReadMode() || !check_image)
+    return;
+  const StorageImage::Identity current = m_image.GetIdentity();
+  if (saved == current)
+    return;
+  if (m_phase == Phase::Command)
+  {
+    WARN_LOG_FMT(IOS_USB, "USB image changed (saved {}); idle drive reset", saved.path);
+    Reset();
+    return;
+  }
+  ERROR_LOG_FMT(IOS_USB, "Cannot restore USB storage: the USB image has changed ({})",
+                saved.path);
+  Core::DisplayMessage(
+      "This savestate cannot be loaded because the USB image has changed "
+      "while a USB command was in progress",
+      4000);
+  Reset();
+  p.SetMeasureMode();
 }
 
 void StorageTransport::Reset()
