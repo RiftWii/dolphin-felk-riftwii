@@ -25,6 +25,7 @@
 #include "Core/CoreTiming.h"
 #include "Core/HW/Memmap.h"
 #include "Core/IOS/ES/Formats.h"
+#include "Core/IOS/FS/D2xFileSystem.h"
 #include "Core/IOS/FS/FileSystem.h"
 #include "Core/IOS/FS/FileSystemProxy.h"
 #include "Core/IOS/IOSC.h"
@@ -546,6 +547,14 @@ void ESDevice::DoState(PointerWrap& p)
   p.Do(m_pending_ppc_boot_content_path);
   // d2x's ES settings outlive this instance, but a savestate restores them too.
   p.Do(s_d2x);
+  auto& pending_d2x_nand = FS::GetPendingNandConfigForNextIOSBoot();
+  p.Do(pending_d2x_nand.has_value);
+  p.Do(pending_d2x_nand.config.mode);
+  p.Do(pending_d2x_nand.config.nand_path);
+  p.Do(pending_d2x_nand.config.volume_mounted[0]);
+  p.Do(pending_d2x_nand.config.volume_mounted[1]);
+  p.Do(pending_d2x_nand.config.volume_offsets[0]);
+  p.Do(pending_d2x_nand.config.volume_offsets[1]);
 }
 
 ESDevice::ContextArray::iterator ESDevice::FindActiveContext(s32 fd)
@@ -796,12 +805,18 @@ std::optional<IPCReply> ESDevice::Launch(const IOCtlVRequest& request)
 
   // Prevent loading installed IOSes that are not emulated.
   if (!IsEmulatedOrD2xSlot(title_id))
+  {
+    FS::TakeNandConfigForNextIOSBoot();
     return IPCReply(FS_ENOENT);
+  }
 
   // IOS replies to the request through the mailbox on failure, and acks if the launch succeeds.
   // Note: Launch will potentially reset the whole IOS state -- including this ES instance.
   if (!LaunchTitle(title_id))
+  {
+    FS::TakeNandConfigForNextIOSBoot();
     return IPCReply(FS_ENOENT);
+  }
 
   // ES_LAUNCH involves restarting IOS, which results in two acknowledgements in a row
   // (one from the previous IOS for this IPC request, and one from the new one as it boots).
@@ -907,6 +922,13 @@ u64 ESDevice::D2xLaunchTarget(u64 title_id)
   if (m_core.m_title_context.active && IsDiscGame(m_core.m_title_context.tmd.GetTitleId()))
   {
     s_d2x.game_title_id = m_core.m_title_context.tmd.GetTitleId();
+    const auto config = GetEmulationKernel().GetD2xFS()->GetNandConfig();
+    if ((config.mode & 3) != 0)
+    {
+      FS::SetNandConfigForNextIOSBoot(config);
+      NOTICE_LOG_FMT(IOS_ES, "d2x: carrying NAND emulation mode {:#x}, folder \"{}\"",
+                     config.mode, config.nand_path);
+    }
     NOTICE_LOG_FMT(IOS_ES, "d2x: {:016x} asked for IOS{}; restarting IOS{} in its place",
                    s_d2x.game_title_id, ios, s_d2x.ios);
     return Titles::IOS(s_d2x.ios);

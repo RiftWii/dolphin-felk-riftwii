@@ -101,8 +101,21 @@ void FSCore::StopD2xNandEmulation()
 {
   if (const auto d2x_fs = m_ios.GetD2xFS())
     d2x_fs->SetMode(0, "");
-  m_d2x_mode = 0;
+  SetD2xNandEmulation(0, "");
+}
+
+void FSCore::SetD2xNandEmulation(u32 mode, const std::string& path)
+{
+  if ((mode & 3) == 0)
+  {
+    m_d2x_mode = 0;
+    m_d2x_nand_path.fill(0);
+    return;
+  }
+  m_d2x_mode = mode | 0x80;
   m_d2x_nand_path.fill(0);
+  const size_t copy_len = std::min(path.size(), m_d2x_nand_path.size() - 1);
+  std::copy_n(path.data(), copy_len, m_d2x_nand_path.data());
 }
 
 FSDevice::FSDevice(EmulationKernel& ios, FSCore& core, const std::string& device_name)
@@ -807,7 +820,6 @@ IPCReply FSDevice::D2xSetMode(const IOCtlVRequest& request)
 {
   constexpr u32 D2X_MODE_SD = 0x01;
   constexpr u32 D2X_MODE_USB = 0x02;
-  constexpr u32 D2X_MODE_REV17 = 0x80;
 
   auto& system = GetSystem();
   auto& memory = system.GetMemory();
@@ -844,10 +856,7 @@ IPCReply FSDevice::D2xSetMode(const IOCtlVRequest& request)
     return GetFSReply(result);
   }
 
-  m_core.m_d2x_mode = mode | D2X_MODE_REV17;
-  m_core.m_d2x_nand_path.fill(0);
-  const size_t copy_len = std::min(path.size(), m_core.m_d2x_nand_path.size() - 1);
-  std::copy_n(path.data(), copy_len, m_core.m_d2x_nand_path.data());
+  m_core.SetD2xNandEmulation(mode, path);
   INFO_LOG_FMT(IOS, "/dev/fs: d2x NAND emulation on: mode {:#x}, path \"{}\"", mode, path);
   return GetFSReply(IPC_SUCCESS);
 }

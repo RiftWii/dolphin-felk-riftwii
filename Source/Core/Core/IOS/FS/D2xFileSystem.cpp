@@ -421,6 +421,53 @@ s32 D2xFileSystem::SetMode(u32 mode, const std::string& path)
   return 0;
 }
 
+D2xFileSystem::NandConfig D2xFileSystem::GetNandConfig() const
+{
+  NandConfig config;
+  config.mode = m_mode;
+  config.nand_path = m_nand_path;
+  for (size_t i = 0; i < m_volumes.size(); ++i)
+  {
+    config.volume_mounted[i] = m_volumes[i].mounted;
+    config.volume_offsets[i] = m_volumes[i].partition_offset;
+  }
+  return config;
+}
+
+void D2xFileSystem::ApplyNandConfig(const NandConfig& config)
+{
+  m_mode = config.mode;
+  m_nand_path = config.nand_path;
+  for (size_t i = 0; i < m_volumes.size(); ++i)
+  {
+    m_volumes[i].mounted = config.volume_mounted[i];
+    m_volumes[i].partition_offset = config.volume_offsets[i];
+  }
+}
+
+namespace
+{
+D2xPendingNand s_pending_d2x_nand;
+}  // namespace
+
+void SetNandConfigForNextIOSBoot(const D2xFileSystem::NandConfig& config)
+{
+  s_pending_d2x_nand.has_value = true;
+  s_pending_d2x_nand.config = config;
+}
+
+D2xPendingNand TakeNandConfigForNextIOSBoot()
+{
+  D2xPendingNand pending = s_pending_d2x_nand;
+  s_pending_d2x_nand = {};
+  return pending;
+}
+
+D2xPendingNand& GetPendingNandConfigForNextIOSBoot()
+{
+  return s_pending_d2x_nand;
+}
+
 void D2xFileSystem::DoState(PointerWrap& p)
 {
   m_real_fs->DoState(p);

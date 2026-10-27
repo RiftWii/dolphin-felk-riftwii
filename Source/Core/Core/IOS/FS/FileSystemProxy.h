@@ -35,6 +35,7 @@ public:
   // d2x's NAND emulation off: mode 0 of ioctlv 100, and every Wii Menu launch.
   void StopD2xNandEmulation();
   bool IsD2xNandEmulated() const { return m_d2x_mode != 0; }
+  void SetD2xNandEmulation(u32 mode, const std::string& path);
 
   class ScopedFd
   {
@@ -115,7 +116,8 @@ private:
   std::map<u64, Handle> m_fd_map;
 
   // d2x's NAND emulation (RIFTWII-D2X.md step 2): the mode and card folder from
-  // /dev/fs ioctlv 100. Cleared on mode 0 and on every IOS restart, as in d2x.
+  // /dev/fs ioctlv 100. Cleared on mode 0 and on IOS restart, except when carried
+  // across d2x's redirected reload.
   static constexpr size_t D2X_NAND_PATH_BYTES = 256;
   u32 m_d2x_mode = 0;
   std::array<char, D2X_NAND_PATH_BYTES> m_d2x_nand_path{};

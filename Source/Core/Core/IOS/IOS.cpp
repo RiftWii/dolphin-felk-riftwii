@@ -380,6 +380,7 @@ bool HasD2xSlot(FS::FileSystem& fs, u64 ios_title_id)
 EmulationKernel::EmulationKernel(Core::System& system, u64 title_id)
     : Kernel(title_id), m_system(system)
 {
+  auto pending_d2x_nand = FS::TakeNandConfigForNextIOSBoot();
   INFO_LOG_FMT(IOS, "Starting IOS {:016x}", title_id);
 
   if (title_id != Titles::MIOS)
@@ -404,6 +405,8 @@ EmulationKernel::EmulationKernel(Core::System& system, u64 title_id)
           const u8 system_code = m_system.GetMemory().Read_U8(0);
           return system_code == 'R' || system_code == 'S';
         });
+    if (pending_d2x_nand.has_value)
+      m_d2x_fs->ApplyNandConfig(pending_d2x_nand.config);
     m_fs = m_d2x_fs;
     NOTICE_LOG_FMT(IOS, "IOS{} is d2x on base IOS{}, revision {}", static_cast<u32>(title_id),
                    d2x->base, d2x->revision);
@@ -423,6 +426,13 @@ EmulationKernel::EmulationKernel(Core::System& system, u64 title_id)
   AddDevice(std::make_unique<ShaDevice>(*this, "/dev/sha"));
 
   m_fs_core = std::make_unique<FSCore>(*this);
+  if (d2x && pending_d2x_nand.has_value)
+  {
+    m_fs_core->SetD2xNandEmulation(pending_d2x_nand.config.mode,
+                                   pending_d2x_nand.config.nand_path);
+    NOTICE_LOG_FMT(IOS, "d2x: restored NAND emulation mode {:#x}, folder \"{}\"",
+                   pending_d2x_nand.config.mode, pending_d2x_nand.config.nand_path);
+  }
   AddDevice(std::make_unique<FSDevice>(*this, *m_fs_core, "/dev/fs"));
   m_es_core = std::make_unique<ESCore>(*this);
   AddDevice(std::make_unique<ESDevice>(*this, *m_es_core, "/dev/es"));

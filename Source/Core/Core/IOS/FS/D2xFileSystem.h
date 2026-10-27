@@ -33,6 +33,18 @@ public:
   void Unmount(bool usb = false);
   s32 SetMode(u32 mode, const std::string& path);
   bool IsEmulated(const std::string& path) const;
+
+  // Carried across d2x's redirected IOS reload, which replaces the kernel.
+  struct NandConfig
+  {
+    u32 mode = 0;
+    std::string nand_path;
+    std::array<bool, 2> volume_mounted = {};
+    std::array<u32, 2> volume_offsets = {};
+  };
+  NandConfig GetNandConfig() const;
+  void ApplyNandConfig(const NandConfig& config);
+
   // The console's own NAND, which this wraps.
   std::shared_ptr<FileSystem> GetRealFS() const { return m_real_fs; }
 
@@ -102,4 +114,14 @@ private:
   u32 m_mode = 0;
   std::string m_nand_path;
 };
+
+// NAND emulation carried across d2x's redirected IOS reload.
+struct D2xPendingNand
+{
+  bool has_value = false;
+  D2xFileSystem::NandConfig config;
+};
+void SetNandConfigForNextIOSBoot(const D2xFileSystem::NandConfig& config);
+D2xPendingNand TakeNandConfigForNextIOSBoot();
+D2xPendingNand& GetPendingNandConfigForNextIOSBoot();
 }  // namespace IOS::HLE::FS

@@ -264,4 +264,58 @@ TEST_F(D2xFileSystemTest, SuperfloppyPartitionSelectionAndEmptyWrite)
   EXPECT_EQ(m_fs->GetFileStatus(fd)->size, 0u);
   EXPECT_EQ(m_fs->Close(fd), ResultCode::Success);
 }
+
+TEST_F(D2xFileSystemTest, CarriedNandConfigAppliesWithoutMount)
+{
+  ASSERT_EQ(m_fs->CreateDirectory(0, 0, "/nands", 0, modes), ResultCode::Success);
+  ASSERT_EQ(m_fs->CreateDirectory(0, 0, "/nands/carry", 0, modes), ResultCode::Success);
+  ASSERT_EQ(m_fs->SetMode(0x101, "/nands/carry"), 0);
+  EXPECT_TRUE(m_fs->IsEmulated("/sys/uid.sys"));
+  EXPECT_FALSE(m_fs->IsEmulated("/tmp/launch.sys"));
+  EXPECT_FALSE(m_fs->IsEmulated("/dev/fs"));
+  ASSERT_EQ(m_fs->CreateFile(0, 0, "/title/00010001/keep.bin", 0, modes), ResultCode::Success);
+  auto original = m_fs->OpenFile(0, 0, "/title/00010001/keep.bin", Mode::Read);
+  ASSERT_TRUE(original);
+  const auto config = m_fs->GetNandConfig();
+  EXPECT_TRUE(config.mode & 0x80);
+  EXPECT_EQ(config.nand_path, "/nands/carry");
+  D2xFileSystem carried(
+      m_real, [] { return true; }, [] { return 0x4641; }, [this] { return m_disc_title; });
+  carried.ApplyNandConfig(config);
+  EXPECT_FALSE(carried.GetFileStatus(0x10000));
+  EXPECT_EQ(carried.IsEmulated("/sys/uid.sys"), m_fs->IsEmulated("/sys/uid.sys"));
+  EXPECT_EQ(carried.IsEmulated("/tmp/launch.sys"), m_fs->IsEmulated("/tmp/launch.sys"));
+  EXPECT_EQ(carried.IsEmulated("/dev/fs"), m_fs->IsEmulated("/dev/fs"));
+  EXPECT_EQ(carried.IsEmulated("/title/00010001/x"), m_fs->IsEmulated("/title/00010001/x"));
+  const std::string path = "/title/00010001/carried.bin";
+  ASSERT_EQ(carried.CreateFile(0, 0, path, 0, modes), ResultCode::Success);
+  auto writer = carried.OpenFile(0, 0, path, Mode::ReadWrite);
+  ASSERT_TRUE(writer);
+  const std::array<u8, 4> bytes{9, 8, 7, 6};
+  ASSERT_TRUE(writer->Write(bytes.data(), bytes.size()));
+  const auto reader = m_fs->OpenFile(0, 0, path, Mode::Read);
+  ASSERT_TRUE(reader);
+  std::array<u8, 4> read{};
+  ASSERT_TRUE(reader->Read(read.data(), read.size()));
+  EXPECT_EQ(read, bytes);
+  EXPECT_FALSE(m_real->GetMetadata(0, 0, path));
+}
+
+TEST(D2xPendingNandConfigTest, TakenOnce)
+{
+  D2xFileSystem::NandConfig config;
+  config.mode = 0x101;
+  config.nand_path = "/nands/carry";
+  config.volume_mounted = {true, false};
+  config.volume_offsets = {123, 456};
+  SetNandConfigForNextIOSBoot(config);
+  const D2xPendingNand first = TakeNandConfigForNextIOSBoot();
+  EXPECT_TRUE(first.has_value);
+  EXPECT_EQ(first.config.mode, config.mode);
+  EXPECT_EQ(first.config.nand_path, config.nand_path);
+  EXPECT_EQ(first.config.volume_mounted, config.volume_mounted);
+  EXPECT_EQ(first.config.volume_offsets, config.volume_offsets);
+  const D2xPendingNand second = TakeNandConfigForNextIOSBoot();
+  EXPECT_FALSE(second.has_value);
+}
 }  // namespace
