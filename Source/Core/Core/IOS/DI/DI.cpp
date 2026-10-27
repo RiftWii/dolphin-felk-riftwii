@@ -4,6 +4,7 @@
 #include "Core/IOS/DI/DI.h"
 
 #include <memory>
+#include <utility>
 #include <vector>
 
 #include "Common/Assert.h"
@@ -11,6 +12,7 @@
 #include "Common/CommonTypes.h"
 #include "Common/Logging/Log.h"
 #include "Common/MsgHandler.h"
+#include "Core/Config/MainSettings.h"
 #include "Core/Config/SessionSettings.h"
 #include "Core/CoreTiming.h"
 #include "Core/DolphinAnalytics.h"
@@ -21,8 +23,12 @@
 #include "Core/HW/WII_IPC.h"
 #include "Core/IOS/ES/ES.h"
 #include "Core/IOS/ES/Formats.h"
+#include "Core/IOS/SDIO/SDIOSlot0.h"
+#include "Core/IOS/USB/USBStorage.h"
 #include "Core/System.h"
+#include "DiscIO/D2xBlob.h"
 #include "DiscIO/Volume.h"
+#include "DiscIO/VolumeDisc.h"
 
 constexpr u32 ADDRESS_DISR = 0x0D806000;
 constexpr u32 ADDRESS_DICVR = 0x0D806004;
@@ -39,6 +45,24 @@ constexpr u32 ADDRESS_HW_RESETS = 0x0D800194;
 
 namespace IOS::HLE
 {
+namespace
+{
+bool IsRAMRange(const Memory::MemoryManager& memory, u32 address, u32 size)
+{
+  address &= 0x7fffffff;
+  if (address < memory.GetRamSizeReal())
+    return size <= memory.GetRamSizeReal() - address;
+  if (address >= 0x10000000 && address - 0x10000000 < memory.GetExRamSizeReal())
+    return size <= memory.GetExRamSizeReal() - (address - 0x10000000);
+  return false;
+}
+
+bool IsD2xCommand(u32 command)
+{
+  return command == 0xf6 || command == 0xf9 || command == 0xfa;
+}
+}  // namespace
+
 CoreTiming::EventType* DIDevice::s_finish_executing_di_command;
 
 DIDevice::DIDevice(EmulationKernel& ios, const std::string& device_name)
@@ -54,6 +78,8 @@ void DIDevice::DoState(PointerWrap& p)
   p.Do(m_current_partition);
   p.Do(m_has_initialized);
   p.Do(m_last_length);
+  p.Do(m_d2x_fragments);
+  p.Do(m_d2x_disable_reset);
 }
 
 std::optional<IPCReply> DIDevice::Open(const OpenRequest& request)
@@ -73,6 +99,13 @@ std::optional<IPCReply> DIDevice::IOCtl(const IOCtlRequest& request)
 
   auto& system = GetSystem();
   auto& memory = system.GetMemory();
+  if (GetEmulationKernel().IsD2x() && IsD2xCommand(request.request) &&
+      (request.buffer_in_size != 0x20 ||
+       !IsRAMRange(memory, request.buffer_in, request.buffer_in_size)))
+  {
+    WARN_LOG_FMT(IOS_DI, "d2x command {:#x} refused: invalid input buffer", request.request);
+    return IPCReply{static_cast<s32>(DIResult::SecurityError)};
+  }
   const u8 command = memory.Read_U8(request.buffer_in);
   if (request.request != command)
   {
@@ -143,6 +176,67 @@ struct DiscRange
 };
 }  // namespace
 
+bool DIDevice::HasD2xFragments() const
+{
+  return m_d2x_fragments && GetSystem().GetDVDInterface().HasD2xDisc();
+}
+
+std::optional<DIDevice::DIResult> DIDevice::ConfigureD2xFragments(const IOCtlRequest& request)
+{
+  auto& system = GetSystem();
+  auto& memory = system.GetMemory();
+  const u32 device = memory.Read_U32(request.buffer_in + 4);
+  const u32 address = memory.Read_U32(request.buffer_in + 8) & 0x7fffffff;
+  const u32 size = memory.Read_U32(request.buffer_in + 12);
+
+  // d2x closes the previous list even when the replacement is refused.
+  if (HasD2xFragments())
+  {
+    system.GetDVDInterface().SetDisc(nullptr, std::vector<std::string>{});
+    ChangePartition(DiscIO::PARTITION_NONE);
+  }
+  m_d2x_fragments = false;
+  if (device == 0 || address == 0 || size == 0)
+    return WriteIfFits(request, 0);
+
+  const auto refuse = [&](s32 result, const std::string& reason) {
+    WARN_LOG_FMT(IOS_DI, "d2x F9 refused (device {}): {}", device, reason);
+    return WriteIfFits(request, static_cast<u32>(result));
+  };
+  if (device != 1 && device != 2)
+    return refuse(-1, "unknown fragment device");
+  if (size > DiscIO::D2xBlobReader::MAX_LIST_SIZE)
+    return refuse(-3, "fragment list exceeds d2x's size limit");
+  if (device == 1 && USB::StorageImage(USB::StorageImage::GetConfiguredPath()).GetSectorCount() == 0)
+    return refuse(-4, "USB image is absent or invalid");
+  if (device == 2 && !Config::Get(Config::MAIN_WII_SD_CARD))
+    return refuse(-4, "no SD card inserted");
+  if (size < 12 || size % 4 != 0 || !IsRAMRange(memory, address, size))
+    return refuse(-3, "invalid fragment list size or PPC memory range");
+
+  const auto sdio = std::static_pointer_cast<SDIOSlot0Device>(
+      GetEmulationKernel().GetDeviceByName("/dev/sdio/slot0"));
+  if (device == 2 && sdio && !sdio->FlushCardImage())
+    return refuse(-4, "could not flush the SDIO image handle");
+
+  const u8* list = memory.GetPointerForRange(address, size);
+  std::vector<u8> fragment_list(list, list + size);
+  std::string error;
+  u64 disc_size = 0;
+  const s32 result =
+      system.GetDVDInterface().SetD2xDisc(device, std::move(fragment_list), &error, &disc_size);
+  if (result != 0)
+    return refuse(result, error);
+
+  system.GetDVDInterface().ResetDrive(true);
+  ChangePartition(DiscIO::PARTITION_NONE);
+  m_d2x_fragments = true;
+  INFO_LOG_FMT(IOS_DI, "d2x F9 accepted: device {}, {} fragments, virtual disc size {} bytes",
+               device, memory.Read_U32(address + 4), disc_size);
+  // Frag_Init's signed result goes in the output word; the DI command itself succeeds.
+  return WriteIfFits(request, 0);
+}
+
 std::optional<DIDevice::DIResult> DIDevice::StartIOCtl(const IOCtlRequest& request)
 {
   if (request.buffer_in_size != 0x20)
@@ -155,6 +249,33 @@ std::optional<DIDevice::DIResult> DIDevice::StartIOCtl(const IOCtlRequest& reque
   auto& system = GetSystem();
   auto& memory = system.GetMemory();
   auto* mmio = memory.GetMMIOMapping();
+
+  if (GetEmulationKernel().IsD2x() && IsD2xCommand(request.request))
+  {
+    if (GetEmulationKernel().GetESCore().IsTitleRunning())
+    {
+      WARN_LOG_FMT(IOS_DI, "d2x command {:#x} refused: a title is running", request.request);
+      return DIResult::BadArgument;
+    }
+    const bool needs_output = request.request != static_cast<u32>(DIIoctl::D2xDisableReset);
+    if (needs_output && (request.buffer_out_size < 4 || !IsRAMRange(memory, request.buffer_out, 4)))
+    {
+      WARN_LOG_FMT(IOS_DI, "d2x command {:#x} refused: invalid IPC buffers", request.request);
+      return DIResult::SecurityError;
+    }
+    switch (static_cast<DIIoctl>(request.request))
+    {
+    case DIIoctl::D2xDisableReset:
+      m_d2x_disable_reset = memory.Read_U32(request.buffer_in + 4) != 0;
+      return DIResult::Success;
+    case DIIoctl::D2xSetFragments:
+      return ConfigureD2xFragments(request);
+    case DIIoctl::D2xGetMode:
+      return WriteIfFits(request, HasD2xFragments() ? 0x10 : 0);
+    default:
+      break;
+    }
+  }
 
   // DVDInterface's ExecuteCommand handles most of the work for most of these.
   // The IOCtl callback is used to generate a reply afterwards.
@@ -286,6 +407,8 @@ std::optional<DIDevice::DIResult> DIDevice::StartIOCtl(const IOCtlRequest& reque
     return DIResult::Success;
   case DIIoctl::DVDLowReset:
   {
+    if (GetEmulationKernel().IsD2x() && m_d2x_disable_reset)
+      return DIResult::Success;
     const bool spinup = memory.Read_U32(request.buffer_in + 4);
 
     // The GPIO *disables* spinning up the drive.  Normally handled via syscall 0x4e.
@@ -332,6 +455,14 @@ std::optional<DIDevice::DIResult> DIDevice::StartIOCtl(const IOCtlRequest& reque
     const u32 end = position + (length >> 2);  // a 32-bit offset
     INFO_LOG_FMT(IOS_DI, "DVDLowUnencryptedRead: offset {:#010x} (byte {:#011x}), length {:#x}",
                  position, static_cast<u64>(position) << 2, length);
+    if (GetEmulationKernel().IsD2x() && HasD2xFragments())
+    {
+      // d2x allows raw reads throughout the virtual disc. The blob enforces its bounds.
+      mmio->Write<u32>(system, ADDRESS_DICMDBUF0, 0xA8000000);
+      mmio->Write<u32>(system, ADDRESS_DICMDBUF1, position);
+      mmio->Write<u32>(system, ADDRESS_DICMDBUF2, length);
+      return StartDMATransfer(length, request);
+    }
     // (start, end) as 32-bit offsets
     // Older IOS versions only accept the first range.  Later versions added the extra ranges to
     // check how the drive responds to out of bounds reads (an error 001 check).
@@ -461,6 +592,14 @@ std::optional<DIDevice::DIResult> DIDevice::StartIOCtl(const IOCtlRequest& reque
   }
   case DIIoctl::DVDLowReadDiskBca:
     INFO_LOG_FMT(IOS_DI, "DVDLowReadDiskBca");
+    if (GetEmulationKernel().IsD2x() && HasD2xFragments())
+    {
+      // d2x stores the BCA at byte 0x100 in its virtual disc.
+      mmio->Write<u32>(system, ADDRESS_DICMDBUF0, 0xA8000000);
+      mmio->Write<u32>(system, ADDRESS_DICMDBUF1, 0x40);
+      mmio->Write<u32>(system, ADDRESS_DICMDBUF2, 0x40);
+      return StartDMATransfer(0x40, request);
+    }
     mmio->Write<u32>(system, ADDRESS_DICMDBUF0, 0xDA000000);
     return StartDMATransfer(0x40, request);
   case DIIoctl::DVDLowRequestDiscStatus:

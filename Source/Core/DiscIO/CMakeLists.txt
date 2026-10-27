@@ -5,6 +5,8 @@ add_library(discio
   CISOBlob.h
   CompressedBlob.cpp
   CompressedBlob.h
+  D2xBlob.cpp
+  D2xBlob.h
   DirectoryBlob.cpp
   DirectoryBlob.h
   DiscExtractor.cpp

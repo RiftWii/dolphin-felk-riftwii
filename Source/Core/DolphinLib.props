@@ -369,6 +369,8 @@
     <ClInclude Include="Core\IOS\DolphinDevice.h" />
     <ClInclude Include="Core\IOS\ES\ES.h" />
     <ClInclude Include="Core\IOS\ES\Formats.h" />
+    <ClInclude Include="Core\IOS\Fat\Fat.h" />
+    <ClInclude Include="Core\IOS\FS\D2xFileSystem.h" />
     <ClInclude Include="Core\IOS\FS\FileSystem.h" />
     <ClInclude Include="Core\IOS\FS\FileSystemProxy.h" />
     <ClInclude Include="Core\IOS\FS\HostBackend\FS.h" />
@@ -393,6 +395,7 @@
     <ClInclude Include="Core\IOS\Network\SSL.h" />
     <ClInclude Include="Core\IOS\Network\WD\Command.h" />
     <ClInclude Include="Core\IOS\SDIO\SDIOSlot0.h" />
+    <ClInclude Include="Core\IOS\SDIO\D2xSDHC.h" />
     <ClInclude Include="Core\IOS\STM\STM.h" />
     <ClInclude Include="Core\IOS\Uids.h" />
     <ClInclude Include="Core\IOS\USB\Bluetooth\BTBase.h" />
@@ -404,6 +407,9 @@
     <ClInclude Include="Core\IOS\USB\Bluetooth\WiimoteDevice.h" />
     <ClInclude Include="Core\IOS\USB\Bluetooth\WiimoteHIDAttr.h" />
     <ClInclude Include="Core\IOS\USB\Common.h" />
+    <ClInclude Include="Core\IOS\USB\USBStorage.h" />
+    <ClInclude Include="Core\IOS\USB\D2xUSB.h" />
+    <ClInclude Include="Core\IOS\USB\Emulated\MassStorage.h" />
     <ClInclude Include="Core\IOS\USB\Emulated\Infinity.h" />
     <ClInclude Include="Core\IOS\USB\Emulated\Skylanders\Skylander.h" />
     <ClInclude Include="Core\IOS\USB\Emulated\Skylanders\SkylanderCrypto.h" />
@@ -470,6 +476,7 @@
     <ClInclude Include="DiscIO\Blob.h" />
     <ClInclude Include="DiscIO\CISOBlob.h" />
     <ClInclude Include="DiscIO\CompressedBlob.h" />
+    <ClInclude Include="DiscIO\D2xBlob.h" />
     <ClInclude Include="DiscIO\DirectoryBlob.h" />
     <ClInclude Include="DiscIO\DiscExtractor.h" />
     <ClInclude Include="DiscIO\DiscScrubber.h" />
@@ -1042,6 +1049,8 @@
     <ClCompile Include="Core\IOS\ES\TitleInformation.cpp" />
     <ClCompile Include="Core\IOS\ES\TitleManagement.cpp" />
     <ClCompile Include="Core\IOS\ES\Views.cpp" />
+    <ClCompile Include="Core\IOS\Fat\Fat.cpp" />
+    <ClCompile Include="Core\IOS\FS\D2xFileSystem.cpp" />
     <ClCompile Include="Core\IOS\FS\FileSystemCommon.cpp" />
     <ClCompile Include="Core\IOS\FS\FileSystemProxy.cpp" />
     <ClCompile Include="Core\IOS\FS\HostBackend\File.cpp" />
@@ -1065,6 +1074,7 @@
     <ClCompile Include="Core\IOS\Network\SSL.cpp" />
     <ClCompile Include="Core\IOS\Network\WD\Command.cpp" />
     <ClCompile Include="Core\IOS\SDIO\SDIOSlot0.cpp" />
+    <ClCompile Include="Core\IOS\SDIO\D2xSDHC.cpp" />
     <ClCompile Include="Core\IOS\STM\STM.cpp" />
     <ClCompile Include="Core\IOS\USB\Bluetooth\BTBase.cpp" />
     <ClCompile Include="Core\IOS\USB\Bluetooth\BTEmu.cpp" />
@@ -1073,6 +1083,9 @@
     <ClCompile Include="Core\IOS\USB\Bluetooth\WiimoteDevice.cpp" />
     <ClCompile Include="Core\IOS\USB\Bluetooth\WiimoteHIDAttr.cpp" />
     <ClCompile Include="Core\IOS\USB\Common.cpp" />
+    <ClCompile Include="Core\IOS\USB\USBStorage.cpp" />
+    <ClCompile Include="Core\IOS\USB\D2xUSB.cpp" />
+    <ClCompile Include="Core\IOS\USB\Emulated\MassStorage.cpp" />
     <ClCompile Include="Core\IOS\USB\Emulated\Infinity.cpp" />
     <ClCompile Include="Core\IOS\USB\Emulated\Skylanders\Skylander.cpp" />
     <ClCompile Include="Core\IOS\USB\Emulated\Skylanders\SkylanderCrypto.cpp" />
@@ -1141,6 +1154,7 @@
     <ClCompile Include="DiscIO\Blob.cpp" />
     <ClCompile Include="DiscIO\CISOBlob.cpp" />
     <ClCompile Include="DiscIO\CompressedBlob.cpp" />
+    <ClCompile Include="DiscIO\D2xBlob.cpp" />
     <ClCompile Include="DiscIO\DirectoryBlob.cpp" />
     <ClCompile Include="DiscIO\DiscExtractor.cpp" />
     <ClCompile Include="DiscIO\DiscScrubber.cpp" />

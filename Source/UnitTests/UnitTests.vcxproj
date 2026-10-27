@@ -38,6 +38,8 @@
     <ClCompile Include="$(ExternalsDir)gtest\googletest\src\gtest-all.cc" />
     <!--Lump all of the tests (and supporting code) into one binary-->
     <ClCompile Include="UnitTestsMain.cpp" />
+    <ClCompile Include="Core\D2xBlobTest.cpp" />
+    <ClCompile Include="Core\DVDStateTest.cpp" />
     <ClCompile Include="Common\BitFieldTest.cpp" />
     <ClCompile Include="Common\BitSetTest.cpp" />
     <ClCompile Include="Common\BitUtilsTest.cpp" />
@@ -67,6 +69,8 @@
     <ClCompile Include="Core\DSP\HermesText.cpp" />
     <ClCompile Include="Core\IOS\ES\FormatsTest.cpp" />
     <ClCompile Include="Core\IOS\FS\FileSystemTest.cpp" />
+    <ClCompile Include="Core\IOS\FS\D2xFileSystemTest.cpp" />
+    <ClCompile Include="Core\IOS\USB\USBStorageTest.cpp" />
     <ClCompile Include="Core\IOS\USB\SkylandersTest.cpp" />
     <ClCompile Include="Core\MMIOTest.cpp" />
     <ClCompile Include="Core\PageFaultTest.cpp" />

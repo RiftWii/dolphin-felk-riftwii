@@ -98,7 +98,7 @@ static size_t s_state_writes_in_queue;
 static std::condition_variable s_state_write_queue_is_empty;
 
 // Don't forget to increase this after doing changes on the savestate system
-constexpr u32 STATE_VERSION = 169;  // Last changed in PR 13074
+constexpr u32 STATE_VERSION = 179;  // Last changed by RiftWii's d2x emulation (RIFTWII-D2X.md)
 
 // Increase this if the StateExtendedHeader definition changes
 constexpr u32 EXTENDED_HEADER_VERSION = 1;  // Last changed in PR 12217
@@ -204,28 +204,69 @@ static void DoState(Core::System& system, PointerWrap& p)
 #endif  // USE_RETRO_ACHIEVEMENTS
 }
 
-void LoadFromBuffer(Core::System& system, std::vector<u8>& buffer)
+static bool CanLoadStateFromBuffer()
 {
   if (NetPlay::IsNetPlayRunning())
   {
     OSD::AddMessage("Loading savestates is disabled in Netplay to prevent desyncs");
-    return;
+    return false;
   }
 
   if (AchievementManager::GetInstance().IsHardcoreModeActive())
   {
     OSD::AddMessage("Loading savestates is disabled in RetroAchievements hardcore mode");
-    return;
+    return false;
   }
 
+  return true;
+}
+
+static bool ReadStateBuffer(Core::System& system, std::vector<u8>& buffer)
+{
+  u8* ptr = buffer.data();
+  PointerWrap p(&ptr, buffer.size(), PointerWrap::Mode::Read);
+  DoState(system, p);
+  return p.IsReadMode();
+}
+
+bool LoadFromBuffer(Core::System& system, std::vector<u8>& buffer)
+{
+  if (!CanLoadStateFromBuffer())
+    return false;
+
+  bool result = true;
   Core::RunOnCPUThread(
       system,
       [&] {
-        u8* ptr = buffer.data();
-        PointerWrap p(&ptr, buffer.size(), PointerWrap::Mode::Read);
+        std::vector<u8> backup;
+        u8* ptr = nullptr;
+        PointerWrap p_measure(&ptr, 0, PointerWrap::Mode::Measure);
+        DoState(system, p_measure);
+        const size_t buffer_size = reinterpret_cast<size_t>(ptr);
+        backup.resize(buffer_size);
+        ptr = backup.data();
+        PointerWrap p(&ptr, buffer_size, PointerWrap::Mode::Write);
         DoState(system, p);
+        if (!p.IsWriteMode())
+        {
+          Core::DisplayMessage("The savestate could not be loaded", OSD::Duration::NORMAL);
+          result = false;
+          return;
+        }
+
+        if (!ReadStateBuffer(system, buffer))
+        {
+          Core::DisplayMessage("The savestate could not be loaded", OSD::Duration::NORMAL);
+          if (!ReadStateBuffer(system, backup))
+          {
+            PanicAlertFmt(
+                "The savestate could not be loaded, and the previous state could not be restored");
+          }
+          result = false;
+        }
       },
       true);
+  return result;
 }
 
 void SaveToBuffer(Core::System& system, std::vector<u8>& buffer)
@@ -876,17 +917,21 @@ void LoadAs(Core::System& system, const std::string& filename)
   Core::RunOnCPUThread(
       system,
       [&] {
-        // Save temp buffer for undo load state
+        // Every attempted load needs an undo snapshot, including refused d2x loads. Unlike
+        // upstream, it's also taken while a movie starts recording from this state; only the
+        // movie backup is skipped then.
         auto& movie = system.GetMovie();
-        if (!movie.IsJustStartingRecordingInputFromSaveState())
         {
           std::lock_guard lk2(s_undo_load_buffer_mutex);
           SaveToBuffer(system, s_undo_load_buffer);
-          const std::string dtmpath = File::GetUserPath(D_STATESAVES_IDX) + "undo.dtm";
-          if (movie.IsMovieActive())
-            movie.SaveRecording(dtmpath);
-          else if (File::Exists(dtmpath))
-            File::Delete(dtmpath);
+          if (!movie.IsJustStartingRecordingInputFromSaveState())
+          {
+            const std::string dtmpath = File::GetUserPath(D_STATESAVES_IDX) + "undo.dtm";
+            if (movie.IsMovieActive())
+              movie.SaveRecording(dtmpath);
+            else if (File::Exists(dtmpath))
+              File::Delete(dtmpath);
+          }
         }
 
         bool loaded = false;
@@ -1032,8 +1077,8 @@ void UndoLoadState(Core::System& system)
       const std::string dtmpath = File::GetUserPath(D_STATESAVES_IDX) + "undo.dtm";
       if (File::Exists(dtmpath))
       {
-        LoadFromBuffer(system, s_undo_load_buffer);
-        movie.LoadInput(dtmpath);
+        if (LoadFromBuffer(system, s_undo_load_buffer))
+          movie.LoadInput(dtmpath);
       }
       else
       {

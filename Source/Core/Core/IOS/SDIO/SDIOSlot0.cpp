@@ -19,6 +19,7 @@
 #include "Core/Config/MainSettings.h"
 #include "Core/Config/SessionSettings.h"
 #include "Core/Core.h"
+#include "Core/HW/DVD/DVDInterface.h"
 #include "Core/HW/Memmap.h"
 #include "Core/IOS/IOS.h"
 #include "Core/IOS/VersionInfo.h"
@@ -88,15 +89,21 @@ void SDIOSlot0Device::EventNotify()
 
 void SDIOSlot0Device::OpenInternal()
 {
+  // d2x's NAND emulation and its disc reader open the image too. The disc reader keeps it open
+  // across IOS reloads, also into a stock IOS, and a savestate load can open either one first,
+  // so the card is always opened shared.
+  const bool other_handles =
+      GetEmulationKernel().IsD2x() || GetSystem().GetDVDInterface().HasD2xDisc();
   const std::string filename = File::GetUserPath(F_WIISDCARDIMAGE_IDX);
-  m_card.Open(filename, "r+b");
+  constexpr auto shared_access = File::SharedAccess::ReadWrite;
+  m_card.Open(filename, "r+b", shared_access);
   if (!m_card)
   {
     WARN_LOG_FMT(IOS_SD, "Failed to open SD Card image, trying to create a new 128 MB image...");
     if (Common::SDCardCreate(128, filename))
     {
       INFO_LOG_FMT(IOS_SD, "Successfully created {}", filename);
-      m_card.Open(filename, "r+b");
+      m_card.Open(filename, "r+b", shared_access);
     }
     if (!m_card)
     {
@@ -104,6 +111,20 @@ void SDIOSlot0Device::OpenInternal()
                             "from a read-only directory?");
     }
   }
+  // d2x (and its disc reader) use other host handles. Disable read-ahead and
+  // deferred writes here so sector access observes those requests immediately.
+  if (m_card.IsOpen() && other_handles)
+    std::setvbuf(m_card.GetHandle(), nullptr, _IONBF, 0);
+}
+
+bool SDIOSlot0Device::FlushCardImage()
+{
+  if (!m_card.IsOpen())
+    return true;
+  // IOFile::Flush reports any earlier error too; start clean so one failed
+  // request does not make every later flush fail.
+  m_card.ClearError();
+  return m_card.Flush();
 }
 
 std::optional<IPCReply> SDIOSlot0Device::Open(const OpenRequest& request)

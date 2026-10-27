@@ -4,6 +4,8 @@
 #pragma once
 
 #include <array>
+#include <cstddef>
+#include <functional>
 #include <map>
 #include <optional>
 #include <string>
@@ -18,6 +20,12 @@ class PointerWrap;
 
 namespace IOS::HLE
 {
+// Validates the bounded guest range before invoking the reader. An empty vector
+// selects the NAND root and must not invoke GetString's unbounded zero-size mode.
+std::optional<std::string>
+ReadD2xNandPath(u32 address, u32 size, size_t capacity, u32 ram_size, u32 exram_size,
+                const std::function<std::string(u32, size_t)>& read_string);
+
 constexpr FS::Fd INVALID_FD = 0xffffffff;
 
 class FSDevice;
@@ -31,6 +39,11 @@ public:
   FSCore& operator=(const FSCore& other) = delete;
   FSCore& operator=(FSCore&& other) = delete;
   ~FSCore();
+
+  // d2x's NAND emulation off: mode 0 of ioctlv 100, and every Wii Menu launch.
+  void StopD2xNandEmulation();
+  bool IsD2xNandEmulated() const { return m_d2x_mode != 0; }
+  void SetD2xNandEmulation(u32 mode, const std::string& path);
 
   class ScopedFd
   {
@@ -110,6 +123,13 @@ private:
   u64 m_next_fd = 0x18;
   std::map<u64, Handle> m_fd_map;
 
+  // d2x's NAND emulation (RIFTWII-D2X.md step 2): the mode and card folder from
+  // /dev/fs ioctlv 100. Cleared on mode 0 and on IOS restart, except when carried
+  // across d2x's redirected reload.
+  static constexpr size_t D2X_NAND_PATH_BYTES = 256;
+  u32 m_d2x_mode = 0;
+  std::array<char, D2X_NAND_PATH_BYTES> m_d2x_nand_path{};
+
   friend class FSDevice;
 };
 
@@ -145,6 +165,7 @@ private:
     ISFS_IOCTL_GETFILESTATS = 11,
     ISFS_IOCTLV_GETUSAGE = 12,
     ISFS_IOCTL_SHUTDOWN = 13,
+    ISFS_IOCTLV_SETMODE_D2X = 100,
   };
 
   using Handle = FSCore::Handle;
@@ -162,6 +183,7 @@ private:
   IPCReply GetFileStats(const Handle& handle, const IOCtlRequest& request);
   IPCReply GetUsage(const Handle& handle, const IOCtlVRequest& request);
   IPCReply Shutdown(const Handle& handle, const IOCtlRequest& request);
+  IPCReply D2xSetMode(const IOCtlVRequest& request);
 
   FSCore& m_core;
 };

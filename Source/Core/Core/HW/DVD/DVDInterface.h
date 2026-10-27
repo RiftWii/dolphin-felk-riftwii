@@ -26,6 +26,7 @@ struct EventType;
 }
 namespace DiscIO
 {
+class Volume;
 class VolumeDisc;
 struct Partition;
 }  // namespace DiscIO
@@ -140,6 +141,9 @@ public:
 
   void SetDisc(std::unique_ptr<DiscIO::VolumeDisc> disc,
                std::optional<std::vector<std::string>> auto_disc_change_paths);
+  s32 SetD2xDisc(u32 device, std::vector<u8> fragment_list, std::string* error,
+                 u64* disc_size = nullptr);
+  bool HasD2xDisc() const { return !m_d2x_fragment_list.empty(); }
   bool IsDiscInside() const;
   void EjectDisc(const Core::CPUThreadGuard& guard, EjectCause cause);
   void ChangeDisc(const Core::CPUThreadGuard& guard, const std::vector<std::string>& paths);
@@ -294,6 +298,15 @@ private:
   std::string m_disc_path_to_insert;
   std::vector<std::string> m_auto_disc_change_paths;
   size_t m_auto_disc_change_index = 0;
+
+  // Recipe for rebuilding a d2x virtual disc when loading a savestate.
+  u32 m_d2x_device = 0;
+  std::vector<u8> m_d2x_fragment_list;
+  std::string m_d2x_game_id;
+
+  // Keep the replaced disc so undoing a refused d2x restore can put it back. Not savestated.
+  std::unique_ptr<DiscIO::Volume> m_disc_before_d2x_restore;
+  u64 m_disc_end_offset_before_d2x_restore = 0;
 
   // Events
   CoreTiming::EventType* m_finish_executing_command = nullptr;

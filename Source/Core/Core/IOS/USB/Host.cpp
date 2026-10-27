@@ -23,6 +23,7 @@
 #include "Core/Core.h"
 #include "Core/IOS/USB/Common.h"
 #include "Core/IOS/USB/Emulated/Infinity.h"
+#include "Core/IOS/USB/Emulated/MassStorage.h"
 #include "Core/IOS/USB/Emulated/Skylanders/Skylander.h"
 #include "Core/IOS/USB/LibusbDevice.h"
 #include "Core/NetPlayProto.h"
@@ -61,6 +62,31 @@ void USBHost::UpdateWantDeterminism(const bool new_want_determinism)
 void USBHost::DoState(PointerWrap& p)
 {
   Device::DoState(p);
+  {
+    // The scan thread can change the device list, so keep it stable while saving or loading.
+    std::lock_guard lk(m_devices_mutex);
+    const auto it = m_devices.find(USB::MassStorage::DEVICE_ID);
+    const bool has_storage = it != m_devices.end();
+    bool saved_has_storage = has_storage;
+    p.Do(saved_has_storage);
+    if (saved_has_storage)
+    {
+      if (has_storage)
+      {
+        static_cast<USB::MassStorage&>(*it->second).DoState(p);
+      }
+      else
+      {
+        // Consume the absent drive's state without carrying its command into a future insertion.
+        USB::MassStorage disconnected_storage(GetEmulationKernel());
+        disconnected_storage.DoState(p, false);
+      }
+    }
+    else if (p.IsReadMode() && has_storage)
+    {
+      static_cast<USB::MassStorage&>(*it->second).Reset();
+    }
+  }
   if (IsOpened() && p.IsReadMode())
   {
     // After a state has loaded, there may be insertion hooks for devices that were
@@ -185,6 +211,11 @@ void USBHost::DispatchHooks(const DeviceChangeHooks& hooks)
 void USBHost::AddEmulatedDevices(std::set<u64>& new_devices, DeviceChangeHooks& hooks,
                                  bool always_add_hooks)
 {
+  if (!USB::StorageImage::GetConfiguredPath().empty() && !NetPlay::IsNetPlayRunning())
+  {
+    CheckAndAddDevice(std::make_unique<USB::MassStorage>(GetEmulationKernel()), new_devices, hooks,
+                      always_add_hooks);
+  }
   if (Config::Get(Config::MAIN_EMULATE_SKYLANDER_PORTAL) && !NetPlay::IsNetPlayRunning())
   {
     auto skylanderportal =

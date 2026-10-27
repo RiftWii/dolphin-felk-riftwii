@@ -46,10 +46,12 @@ IPCReply ESDevice::GetTicketViewCount(const IOCtlVRequest& request)
 
   const u64 TitleID = memory.Read_U64(request.in_vectors[0].address);
 
-  const ES::TicketReader ticket = m_core.FindSignedTicket(TitleID);
+  ES::TicketReader ticket = m_core.FindSignedTicket(TitleID);
+  if (!ticket.IsValid())
+    ticket = D2xMissingTitleTicket(TitleID);
   u32 view_count = ticket.IsValid() ? static_cast<u32>(ticket.GetNumberOfTickets()) : 0;
 
-  if (!IsEmulated(TitleID))
+  if (!IsEmulatedOrD2xSlot(TitleID))
   {
     view_count = 0;
     ERROR_LOG_FMT(IOS_ES, "GetViewCount: Dolphin doesn't emulate IOS title {:016x}", TitleID);
@@ -78,9 +80,11 @@ IPCReply ESDevice::GetTicketViews(const IOCtlVRequest& request)
   const u64 TitleID = memory.Read_U64(request.in_vectors[0].address);
   const u32 maxViews = memory.Read_U32(request.in_vectors[1].address);
 
-  const ES::TicketReader ticket = m_core.FindSignedTicket(TitleID);
+  ES::TicketReader ticket = m_core.FindSignedTicket(TitleID);
+  if (!ticket.IsValid())
+    ticket = D2xMissingTitleTicket(TitleID);
 
-  if (!IsEmulated(TitleID))
+  if (!IsEmulatedOrD2xSlot(TitleID))
   {
     ERROR_LOG_FMT(IOS_ES, "GetViews: Dolphin doesn't emulate IOS title {:016x}", TitleID);
   }

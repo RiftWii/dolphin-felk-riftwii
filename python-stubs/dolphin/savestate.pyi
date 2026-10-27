@@ -35,7 +35,8 @@ def load_from_file(filename: str, /) -> None:
     """
 
 
-def load_from_bytes(state_bytes: bytes, /) -> None:
+def load_from_bytes(state_bytes: bytes, /) -> bool:
     """
     Loads a savestate from the given bytes.
+    Returns False if the savestate was refused; Dolphin then restores the state from before the load.
     """

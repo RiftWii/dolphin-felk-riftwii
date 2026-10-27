@@ -374,6 +374,10 @@ add_library(core
   IOS/ES/TitleInformation.cpp
   IOS/ES/TitleManagement.cpp
   IOS/ES/Views.cpp
+  IOS/Fat/Fat.cpp
+  IOS/Fat/Fat.h
+  IOS/FS/D2xFileSystem.cpp
+  IOS/FS/D2xFileSystem.h
   IOS/FS/FileSystem.h
   IOS/FS/FileSystemCommon.cpp
   IOS/FS/FileSystemProxy.cpp
@@ -421,6 +425,8 @@ add_library(core
   IOS/Network/WD/Command.h
   IOS/SDIO/SDIOSlot0.cpp
   IOS/SDIO/SDIOSlot0.h
+  IOS/SDIO/D2xSDHC.cpp
+  IOS/SDIO/D2xSDHC.h
   IOS/STM/STM.cpp
   IOS/STM/STM.h
   IOS/USB/Bluetooth/BTBase.cpp
@@ -437,6 +443,12 @@ add_library(core
   IOS/USB/Bluetooth/WiimoteHIDAttr.h
   IOS/USB/Common.cpp
   IOS/USB/Common.h
+  IOS/USB/USBStorage.cpp
+  IOS/USB/USBStorage.h
+  IOS/USB/D2xUSB.cpp
+  IOS/USB/D2xUSB.h
+  IOS/USB/Emulated/MassStorage.cpp
+  IOS/USB/Emulated/MassStorage.h
   IOS/USB/Emulated/Infinity.cpp
   IOS/USB/Emulated/Infinity.h
   IOS/USB/Emulated/Skylanders/Skylander.cpp

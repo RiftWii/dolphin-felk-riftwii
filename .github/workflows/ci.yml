@@ -1,0 +1,192 @@
+name: CI
+
+on:
+  # Other branches run through their pull request, so a push to a PR's branch doesn't run everything
+  # twice. es-identify is PR #1's base, so pushes to it are checked too.
+  push:
+    branches: [master, es-identify]
+    paths-ignore: ['**.md', 'docs/**']
+  pull_request:
+    paths-ignore: ['**.md', 'docs/**']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  linux:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    env:
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          persist-credentials: false
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential ninja-build ccache \
+            qt6-base-dev qt6-base-private-dev qt6-svg-dev \
+            libgl-dev libegl-dev libx11-dev libxi-dev libxrandr-dev \
+            libudev-dev libevdev-dev libbluetooth-dev \
+            libasound2-dev libpulse-dev libsystemd-dev \
+            libavcodec-dev libavformat-dev libavutil-dev libswscale-dev \
+            libswresample-dev libusb-1.0-0-dev python3-dev pkg-config
+
+      - name: Restore ccache
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ github.workspace }}/.ccache
+          key: linux-ccache-${{ github.sha }}
+          restore-keys: |
+            linux-ccache-
+
+      - name: Configure ccache
+        run: |
+          mkdir -p "$CCACHE_DIR"
+          ccache --max-size=1G
+          ccache --set-config=compiler_check=content
+          ccache --zero-stats
+
+      - name: Configure
+        run: |
+          cmake -S . -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
+            -DLINUX_LOCAL_DEV=ON \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+
+      - name: Build
+        run: cmake --build build --parallel
+
+      - name: Build unit tests
+        run: cmake --build build --target tests --parallel
+
+      - name: Run unit tests
+        run: ctest --test-dir build/Source/UnitTests --output-on-failure --no-tests=error
+
+      - name: Show ccache stats
+        run: ccache --show-stats
+
+      # Only pushes save the cache, so pull requests don't fill the repo's 10 GB
+      - name: Save ccache
+        if: github.event_name == 'push'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ github.workspace }}/.ccache
+          key: linux-ccache-${{ github.sha }}
+
+  macos:
+    runs-on: macos-15
+    timeout-minutes: 120
+    env:
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          persist-credentials: false
+
+      - name: Install dependencies
+        run: |
+          brew install qt python@3.12 ninja ccache
+
+      - name: Restore ccache
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ github.workspace }}/.ccache
+          key: macos-ccache-${{ github.sha }}
+          restore-keys: |
+            macos-ccache-
+
+      - name: Configure ccache
+        run: |
+          mkdir -p "$CCACHE_DIR"
+          ccache --max-size=1G
+          ccache --set-config=compiler_check=content
+          ccache --zero-stats
+
+      - name: Configure
+        run: |
+          cmake -S . -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
+            -DCMAKE_PREFIX_PATH="$(brew --prefix qt)" \
+            -DPython3_ROOT_DIR="$(brew --prefix python@3.12)" \
+            -DPython3_EXECUTABLE="$(brew --prefix python@3.12)/bin/python3.12" \
+            -DUSE_SYSTEM_FMT=OFF \
+            -DUSE_SYSTEM_SDL2=OFF \
+            -DMACOS_CODE_SIGNING=OFF \
+            -DUSE_BUNDLED_MOLTENVK=ON \
+            -DSKIP_POSTPROCESS_BUNDLE=OFF \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+
+      - name: Build
+        run: cmake --build build --parallel
+
+      - name: Build unit tests
+        run: cmake --build build --target tests --parallel
+
+      - name: Run unit tests
+        run: ctest --test-dir build/Source/UnitTests --output-on-failure --no-tests=error
+
+      - name: Show ccache stats
+        run: ccache --show-stats
+
+      # Only pushes save the cache, so pull requests don't fill the repo's 10 GB
+      - name: Save ccache
+        if: github.event_name == 'push'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ github.workspace }}/.ccache
+          key: macos-ccache-${{ github.sha }}
+
+      - name: Package app
+        run: |
+          # Bundling Qt into the app breaks the linker's signature; Apple Silicon needs one to open it
+          codesign --force --deep --sign - build/Binaries/DolphinQt.app
+          ditto -c -k --keepParent build/Binaries/DolphinQt.app DolphinQt-macos.zip
+
+      - name: Upload app
+        uses: actions/upload-artifact@v4
+        with:
+          name: dolphin-macos
+          path: DolphinQt-macos.zip
+          if-no-files-found: error
+          retention-days: 14
+
+  windows:
+    runs-on: windows-2022
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          persist-credentials: false
+
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Build and test
+        run: msbuild Source/dolphin-emu.sln /p:Configuration=Release /p:Platform=x64 /p:RunUnitTests=true /m /v:minimal
+
+      - name: Upload binaries
+        uses: actions/upload-artifact@v4
+        with:
+          name: dolphin-windows
+          path: |
+            Binary/x64
+            !Binary/x64/Tests
+            !Binary/x64/**/*.pdb
+          if-no-files-found: error
+          retention-days: 14

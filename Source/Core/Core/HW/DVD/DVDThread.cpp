@@ -128,10 +128,10 @@ void DVDThread::DoState(PointerWrap& p)
   // was made. Handling that properly may be more effort than it's worth.
 }
 
-void DVDThread::SetDisc(std::unique_ptr<DiscIO::Volume> disc)
+std::unique_ptr<DiscIO::Volume> DVDThread::SetDisc(std::unique_ptr<DiscIO::Volume> disc)
 {
   WaitUntilIdle();
-  m_disc = std::move(disc);
+  return std::exchange(m_disc, std::move(disc));
 }
 
 bool DVDThread::HasDisc() const

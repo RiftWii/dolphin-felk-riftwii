@@ -64,7 +64,8 @@ public:
   void Stop();
   void DoState(PointerWrap& p);
 
-  void SetDisc(std::unique_ptr<DiscIO::Volume> disc);
+  // Returns the replaced disc after pending reads have finished.
+  std::unique_ptr<DiscIO::Volume> SetDisc(std::unique_ptr<DiscIO::Volume> disc);
   bool HasDisc() const;
 
   bool HasWiiHashes() const;

@@ -45,6 +45,16 @@ public:
 
   void DoState(PointerWrap& p) override;
 
+  // d2x settings, read and restored when d2x's redirected IOS reload replaces this device.
+  // A disc change from Dolphin's GUI drops the virtual disc without telling this device.
+  bool HasD2xFragments() const;
+  bool IsD2xResetDisabled() const { return m_d2x_disable_reset; }
+  void RestoreD2xReloadState(bool fragments, bool disable_reset)
+  {
+    m_d2x_fragments = fragments;
+    m_d2x_disable_reset = disable_reset;
+  }
+
   std::optional<IPCReply> Open(const OpenRequest& request) override;
   std::optional<IPCReply> IOCtl(const IOCtlRequest& request) override;
   std::optional<IPCReply> IOCtlV(const IOCtlVRequest& request) override;
@@ -97,6 +107,9 @@ public:
     DVDLowRequestAudioStatus = 0xe2,
     DVDLowStopMotor = 0xe3,
     DVDLowAudioBufferConfig = 0xe4,
+    D2xDisableReset = 0xf6,
+    D2xSetFragments = 0xf9,
+    D2xGetMode = 0xfa,
   };
 
   enum class DIResult : s32
@@ -124,6 +137,7 @@ private:
 
   void ProcessQueuedIOCtl();
   std::optional<DIResult> StartIOCtl(const IOCtlRequest& request);
+  std::optional<DIResult> ConfigureD2xFragments(const IOCtlRequest& request);
   std::optional<DIResult> WriteIfFits(const IOCtlRequest& request, u32 value);
   std::optional<DIResult> StartDMATransfer(u32 command_length, const IOCtlRequest& request);
   std::optional<DIResult> StartImmediateTransfer(const IOCtlRequest& request,
@@ -144,5 +158,7 @@ private:
 
   bool m_has_initialized = false;
   u32 m_last_length = 0;
+  bool m_d2x_fragments = false;
+  bool m_d2x_disable_reset = false;
 };
 }  // namespace IOS::HLE

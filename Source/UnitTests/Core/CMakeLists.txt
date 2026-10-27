@@ -1,4 +1,6 @@
 add_dolphin_test(MMIOTest MMIOTest.cpp)
+add_dolphin_test(D2xBlobTest D2xBlobTest.cpp)
+add_dolphin_test(DVDStateTest DVDStateTest.cpp)
 add_dolphin_test(PageFaultTest PageFaultTest.cpp)
 add_dolphin_test(CoreTimingTest CoreTimingTest.cpp)
 add_dolphin_test(PatchAllowlistTest PatchAllowlistTest.cpp)
@@ -15,6 +17,7 @@ add_dolphin_test(DSPAssemblyTest
 add_dolphin_test(ESFormatsTest IOS/ES/FormatsTest.cpp)
 
 add_dolphin_test(FileSystemTest IOS/FS/FileSystemTest.cpp)
+add_dolphin_test(D2xFileSystemTest IOS/FS/D2xFileSystemTest.cpp)
 
 add_dolphin_test(SkylandersTest IOS/USB/SkylandersTest.cpp)
 
@@ -42,3 +45,5 @@ endif()
 target_sources(PowerPCTest PRIVATE
   PowerPC/TestValues.h
 )
+
+add_dolphin_test(USBStorageTest IOS/USB/USBStorageTest.cpp)

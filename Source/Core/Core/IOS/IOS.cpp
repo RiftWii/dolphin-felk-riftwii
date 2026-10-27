@@ -5,17 +5,22 @@
 
 #include <algorithm>
 #include <array>
+#include <cctype>
 #include <deque>
 #include <map>
 #include <memory>
+#include <optional>
 #include <string>
 #include <utility>
 
+#include <fmt/format.h>
 #include "Common/Assert.h"
 #include "Common/ChunkFile.h"
 #include "Common/CommonTypes.h"
 #include "Common/EnumUtils.h"
+
 #include "Common/Logging/Log.h"
+#include "Common/Swap.h"
 #include "Common/Timer.h"
 
 #include "Core/Boot/AncastTypes.h"
@@ -26,6 +31,7 @@
 #include "Core/ConfigManager.h"
 #include "Core/Core.h"
 #include "Core/CoreTiming.h"
+#include "Core/HW/DVD/DVDInterface.h"
 #include "Core/HW/Memmap.h"
 #include "Core/HW/WII_IPC.h"
 #include "Core/IOS/Crypto/AesDevice.h"
@@ -35,8 +41,10 @@
 #include "Core/IOS/DeviceStub.h"
 #include "Core/IOS/DolphinDevice.h"
 #include "Core/IOS/ES/ES.h"
+#include "Core/IOS/FS/D2xFileSystem.h"
 #include "Core/IOS/FS/FileSystem.h"
 #include "Core/IOS/FS/FileSystemProxy.h"
+#include "Core/IOS/Fat/Fat.h"
 #include "Core/IOS/MIOS.h"
 #include "Core/IOS/Network/IP/Top.h"
 #include "Core/IOS/Network/KD/NetKDRequest.h"
@@ -45,6 +53,8 @@
 #include "Core/IOS/Network/SSL.h"
 #include "Core/IOS/Network/Socket.h"
 #include "Core/IOS/Network/WD/Command.h"
+#include "Core/IOS/SDIO/D2xSDHC.h"
+#include "Core/IOS/USB/D2xUSB.h"
 #include "Core/IOS/SDIO/SDIOSlot0.h"
 #include "Core/IOS/STM/STM.h"
 #include "Core/IOS/USB/Bluetooth/BTEmu.h"
@@ -55,6 +65,7 @@
 #include "Core/IOS/USB/USB_HID/HIDv5.h"
 #include "Core/IOS/USB/USB_KBD.h"
 #include "Core/IOS/USB/USB_VEN/VEN.h"
+#include "Core/IOS/Uids.h"
 #include "Core/IOS/VersionInfo.h"
 #include "Core/IOS/WFS/WFSI.h"
 #include "Core/IOS/WFS/WFSSRV.h"
@@ -305,12 +316,107 @@ Kernel::Kernel(u64 title_id) : m_title_id(title_id)
 {
 }
 
+// RiftWii's tests (RIFTWII-D2X.md): d2x's version block. A d2x cIOS starts its
+// first content with it, and loaders (RiftWii, USB Loader GX) read it there to
+// recognise d2x: magic 1ee7c105, block version 1, the name ("d2x...") at 0x10,
+// and the base IOS d2x is built on in byte 0x0F.
+struct D2xSlot
+{
+  u32 base;
+  u16 revision;  // the slot's title version, as IOS reports it
+};
+
+static std::optional<D2xSlot> FindD2xSlot(FS::FileSystem& fs, u64 ios_title_id)
+{
+  constexpr u32 D2X_MAGIC = 0x1ee7c105;
+  constexpr size_t TMD_VERSION = 0x1dc;
+  constexpr size_t TMD_FIRST_CONTENT = 0x1e4;
+
+  const u32 slot = static_cast<u32>(ios_title_id);
+  if ((ios_title_id >> 32) != 1 || slot < 200 || slot > 255)
+    return std::nullopt;
+
+  const std::string content_dir = fmt::format("/title/00000001/{:08x}/content", slot);
+  std::array<u8, TMD_FIRST_CONTENT + 4> tmd{};
+  const auto tmd_file =
+      fs.OpenFile(PID_KERNEL, PID_KERNEL, content_dir + "/title.tmd", FS::Mode::Read);
+  if (!tmd_file || !tmd_file->Read(tmd.data(), tmd.size()))
+    return std::nullopt;
+
+  const u32 content_id = Common::swap32(&tmd[TMD_FIRST_CONTENT]);
+  std::array<u8, 0x40> block{};
+  const auto content =
+      fs.OpenFile(PID_KERNEL, PID_KERNEL, fmt::format("{}/{:08x}.app", content_dir, content_id),
+                  FS::Mode::Read);
+  if (!content || !content->Read(block.data(), block.size()))
+    return std::nullopt;
+
+  if (Common::swap32(&block[0]) != D2X_MAGIC || Common::swap32(&block[4]) != 1)
+    return std::nullopt;
+  for (size_t i = 0; i < 3; ++i)
+  {
+    if (std::tolower(block[0x10 + i]) != "d2x"[i])
+      return std::nullopt;
+  }
+
+  const u32 base = block[0x0f];
+  const auto& values = GetMemoryValues();
+  const bool known_base = std::any_of(
+      values.begin(), values.end(), [base](const MemoryValues& v) { return v.ios_number == base; });
+  if (!known_base)
+    return std::nullopt;
+  return D2xSlot{base, Common::swap16(&tmd[TMD_VERSION])};
+}
+
+std::shared_ptr<FS::FileSystem> Kernel::GetRealNandFS()
+{
+  return m_d2x_fs ? m_d2x_fs->GetRealFS() : m_fs;
+}
+
+bool HasD2xSlot(FS::FileSystem& fs, u64 ios_title_id)
+{
+  return FindD2xSlot(fs, ios_title_id).has_value();
+}
+
 EmulationKernel::EmulationKernel(Core::System& system, u64 title_id)
     : Kernel(title_id), m_system(system)
 {
+  const auto d2x_carry = FS::TakeReloadCarryForNextIOSBoot();
+  const bool carry_nand = d2x_carry.has_value && (d2x_carry.nand_config.mode & 3) != 0;
+  m_d2x_es_config_carried = d2x_carry.has_value && d2x_carry.es_config;
   INFO_LOG_FMT(IOS, "Starting IOS {:016x}", title_id);
 
-  if (!SetupMemory(m_system.GetMemory(), title_id, MemorySetupType::IOSReload))
+  if (title_id != Titles::MIOS)
+  {
+    m_fs = FS::MakeFileSystem(IOS::HLE::FS::Location::Session, Core::GetActiveNandRedirects());
+    ASSERT(m_fs);
+  }
+
+  // A slot with d2x's version block runs as the base IOS it names (RIFTWII-D2X.md).
+  const std::optional<D2xSlot> d2x = m_fs ? FindD2xSlot(*m_fs, title_id) : std::nullopt;
+  if (d2x)
+  {
+    m_d2x_base = d2x->base;
+    m_d2x_fs = std::make_shared<FS::D2xFileSystem>(
+        m_fs,
+        [this] {
+          const auto device = GetDeviceByName("/dev/sdio/slot0");
+          return !device || std::static_pointer_cast<SDIOSlot0Device>(device)->FlushCardImage();
+        },
+        [this] { return m_system.GetMemory().Read_U16(4); },
+        [this] {
+          const u8 system_code = m_system.GetMemory().Read_U8(0);
+          return system_code == 'R' || system_code == 'S';
+        });
+    if (carry_nand)
+      m_d2x_fs->ApplyNandConfig(d2x_carry.nand_config);
+    m_fs = m_d2x_fs;
+    NOTICE_LOG_FMT(IOS, "IOS{} is d2x on base IOS{}, revision {}", static_cast<u32>(title_id),
+                   d2x->base, d2x->revision);
+  }
+  if (d2x)
+    m_d2x_revision = d2x->revision;
+  if (!SetupMemoryForThisIOS(MemorySetupType::IOSReload))
     WARN_LOG_FMT(IOS, "No information about this IOS -- cannot set up memory values");
 
   if (title_id == Titles::MIOS)
@@ -319,18 +425,34 @@ EmulationKernel::EmulationKernel(Core::System& system, u64 title_id)
     return;
   }
 
-  m_fs = FS::MakeFileSystem(IOS::HLE::FS::Location::Session, Core::GetActiveNandRedirects());
-  ASSERT(m_fs);
-
   AddDevice(std::make_unique<AesDevice>(*this, "/dev/aes"));
   AddDevice(std::make_unique<ShaDevice>(*this, "/dev/sha"));
 
   m_fs_core = std::make_unique<FSCore>(*this);
+  if (d2x && carry_nand)
+  {
+    m_fs_core->SetD2xNandEmulation(d2x_carry.nand_config.mode, d2x_carry.nand_config.nand_path);
+    NOTICE_LOG_FMT(IOS, "d2x: restored NAND emulation mode {:#x}, folder \"{}\"",
+                   d2x_carry.nand_config.mode, d2x_carry.nand_config.nand_path);
+  }
   AddDevice(std::make_unique<FSDevice>(*this, *m_fs_core, "/dev/fs"));
   m_es_core = std::make_unique<ESCore>(*this);
   AddDevice(std::make_unique<ESDevice>(*this, *m_es_core, "/dev/es"));
 
   AddStaticDevices();
+
+  if (d2x && (d2x_carry.di_fragments || d2x_carry.di_disable_reset))
+  {
+    if (const auto device = GetDeviceByName("/dev/di"))
+    {
+      // The disc device only keeps the fragment mode if the virtual disc is still there.
+      const bool fragments = d2x_carry.di_fragments && m_system.GetDVDInterface().HasD2xDisc();
+      std::static_pointer_cast<DIDevice>(device)->RestoreD2xReloadState(
+          fragments, d2x_carry.di_disable_reset);
+      NOTICE_LOG_FMT(IOS, "d2x: restored disc fragment mode {}, no-reset setting {}", fragments,
+                     d2x_carry.di_disable_reset);
+    }
+  }
 }
 
 EmulationKernel::~EmulationKernel()
@@ -346,6 +468,8 @@ EmulationKernel::~EmulationKernel()
 // are used for the IOS major version -- which is what we want here.
 u32 Kernel::GetVersion() const
 {
+  if (m_d2x_base != 0)
+    return m_d2x_base;
   return static_cast<u32>(m_title_id);
 }
 
@@ -420,6 +544,22 @@ static std::vector<u8> ReadBootContent(FSCore& fs, const std::string& path, size
 
 // This corresponds to syscall 0x41, which loads a binary from the NAND and bootstraps the PPC.
 // Unlike 0x42, IOS will set up some constants in memory before booting the PPC.
+// SetupMemory for the IOS this kernel runs. A d2x slot is not in the memory
+// values table: it uses its base IOS's, and the PPC sees the slot and d2x's
+// revision at 0x3140, as on a Wii.
+bool EmulationKernel::SetupMemoryForThisIOS(MemorySetupType setup_type)
+{
+  auto& memory = m_system.GetMemory();
+  const u64 values_title = IsD2x() ? Titles::IOS(m_d2x_base) : m_title_id;
+  if (!SetupMemory(memory, values_title, setup_type))
+    return false;
+  if (IsD2x())
+  {
+    memory.Write_U32((static_cast<u32>(m_title_id) << 16) | m_d2x_revision, ADDR_IOS_VERSION);
+  }
+  return true;
+}
+
 bool EmulationKernel::BootstrapPPC(const std::string& boot_content_path)
 {
   // Seeking and processing overhead is ignored as most time is spent reading from the NAND.
@@ -430,7 +570,7 @@ bool EmulationKernel::BootstrapPPC(const std::string& boot_content_path)
   if (!dol.IsValid())
     return false;
 
-  if (!SetupMemory(m_system.GetMemory(), m_title_id, MemorySetupType::Full))
+  if (!SetupMemoryForThisIOS(MemorySetupType::Full))
     return false;
 
   // Reset the PPC and pause its execution until we're ready.
@@ -567,6 +707,13 @@ void EmulationKernel::AddStaticDevices()
   AddDevice(std::make_unique<SDIOSlot0Device>(*this, "/dev/sdio/slot0"));
   AddDevice(std::make_unique<DeviceStub>(*this, "/dev/sdio/slot1"));
 
+  if (IsD2x())
+  {
+    AddDevice(std::make_unique<FatDevice>(*this, "fat"));
+    AddDevice(std::make_unique<D2xUSBDevice>(*this, "/dev/usb2"));
+    AddDevice(std::make_unique<D2xSDHCDevice>(*this, "/dev/sdio/sdhc"));
+  }
+
   // Network modules
   if (HasFeature(features, Feature::KD) || HasFeature(features, Feature::SO) ||
       HasFeature(features, Feature::SSL))
@@ -685,6 +832,10 @@ std::optional<IPCReply> EmulationKernel::OpenDevice(OpenRequest& request)
   else if (request.path.starts_with('/'))
   {
     device = GetDeviceByName("/dev/fs");
+  }
+  else if (request.path == "fat")
+  {
+    device = GetDeviceByName("fat");
   }
 
   if (!device)
@@ -869,12 +1020,43 @@ void EmulationKernel::DoState(PointerWrap& p)
   p.Do(m_reply_queue);
   p.Do(m_last_reply_time);
   p.Do(m_ipc_paused);
-  p.Do(m_title_id);
+  // A d2x kernel has a different file system and device set from its base IOS, and a load
+  // doesn't rebuild them, so a state from a differently built kernel can't be read.
+  u64 title_id = m_title_id;
+  u32 d2x_base = m_d2x_base;
+  u16 d2x_revision = m_d2x_revision;
+  p.Do(title_id);
+  p.Do(d2x_base);
+  p.Do(d2x_revision);
+  if (p.IsReadMode() && (d2x_base != 0 || IsD2x()) &&
+      ((d2x_base != 0) != IsD2x() ||
+       GetFeatures(d2x_base != 0 ? d2x_base : static_cast<u32>(title_id)) !=
+           GetFeatures(GetVersion())))
+  {
+    const std::string saved_ios =
+        d2x_base != 0 ?
+            fmt::format("IOS{} (d2x base {})", static_cast<u32>(title_id), d2x_base) :
+            fmt::format("IOS{} (not d2x)", static_cast<u32>(title_id));
+    const std::string running_ios =
+        m_d2x_base != 0 ?
+            fmt::format("IOS{} (d2x base {})", static_cast<u32>(m_title_id), m_d2x_base) :
+            fmt::format("IOS{} (not d2x)", static_cast<u32>(m_title_id));
+    ERROR_LOG_FMT(IOS, "Savestate is from {}, but {} is running", saved_ios, running_ios);
+    Core::DisplayMessage(
+        "This savestate was saved under a different IOS (d2x or IOS features differ)", 4000);
+    // Keep the running IOS identity so Dolphin can undo the load with the same kernel.
+    p.SetMeasureMode();
+    return;
+  }
+  m_title_id = title_id;
+  m_d2x_base = d2x_base;
+  m_d2x_revision = d2x_revision;
   p.Do(m_ppc_uid);
   p.Do(m_ppc_gid);
 
   m_iosc.DoState(p);
-  m_fs->DoState(p);
+  if (m_fs)
+    m_fs->DoState(p);
 
   if (m_title_id == Titles::MIOS)
     return;
@@ -994,6 +1176,9 @@ void Shutdown(Core::System& system)
 {
   system.SetIOS(nullptr);
   ESDevice::FinalizeEmulationState();
+  // A redirected reload that never booted (Stop during its boot delay) must not carry d2x's
+  // state into the next session.
+  FS::TakeReloadCarryForNextIOSBoot();
 }
 
 // Based on a hardware test, a device takes at least ~2700 ticks to reply to an IPC request.

@@ -16,6 +16,10 @@ set(CMAKE_AUTORCC ON)
 
 find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Svg)
 message(STATUS "Found Qt version ${Qt6_VERSION}")
+# Qt 6.10 moved the private headers (qpa/...) into their own package
+if(Qt6_VERSION VERSION_GREATER_EQUAL 6.10)
+  find_package(Qt6 REQUIRED COMPONENTS GuiPrivate)
+endif()
 
 set_property(TARGET Qt6::Core PROPERTY INTERFACE_COMPILE_FEATURES "")
 
@@ -431,6 +435,10 @@ PRIVATE
   imgui
   implot
 )
+
+if(TARGET Qt6::GuiPrivate)
+  target_link_libraries(dolphin-emu PRIVATE Qt6::GuiPrivate)
+endif()
 
 if (WIN32)
   target_link_libraries(dolphin-emu

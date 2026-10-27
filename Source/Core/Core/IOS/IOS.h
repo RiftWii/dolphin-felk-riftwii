@@ -33,7 +33,8 @@ namespace IOS::HLE
 namespace FS
 {
 class FileSystem;
-}
+class D2xFileSystem;
+}  // namespace FS
 
 class Device;
 class ESCore;
@@ -117,6 +118,10 @@ void RAMOverrideForIOSMemoryValues(Memory::MemoryManager& memory, MemorySetupTyp
 
 void WriteReturnValue(Memory::MemoryManager& memory, s32 value, u32 address);
 
+// RiftWii's tests (RIFTWII-D2X.md): whether this IOS title is a cIOS slot whose
+// first content starts with d2x's version block, so it boots as d2x.
+bool HasD2xSlot(FS::FileSystem& fs, u64 ios_title_id);
+
 // HLE for the IOS kernel: IPC, device management, syscalls, and Dolphin-specific, IOS-wide calls.
 class Kernel
 {
@@ -127,10 +132,20 @@ public:
   // These are *always* part of the IOS kernel and always available.
   // They are also the only available resource managers even before loading any module.
   std::shared_ptr<FS::FileSystem> GetFS();
+  std::shared_ptr<FS::D2xFileSystem> GetD2xFS() const { return m_d2x_fs; }
+  // The console's own NAND, without d2x's emulation (where IOS slots are).
+  std::shared_ptr<FS::FileSystem> GetRealNandFS();
   FSCore& GetFSCore();
   ESCore& GetESCore();
 
   u32 GetVersion() const;
+
+  // RiftWii's tests (RIFTWII-D2X.md): a d2x cIOS runs in this slot. GetVersion()
+  // then gives the base IOS d2x is built on, whose devices and features Dolphin
+  // uses; the slot and d2x's revision are what the PPC sees at 0x80003140.
+  bool IsD2x() const { return m_d2x_base != 0; }
+  // d2x's ES settings came across a redirected reload (D2xReloadCarry).
+  bool HasCarriedD2xEsConfig() const { return m_d2x_es_config_carried; }
 
   IOSC& GetIOSC();
 
@@ -142,9 +157,13 @@ protected:
 
   bool m_is_responsible_for_nand_root = false;
   u64 m_title_id = 0;
+  u32 m_d2x_base = 0;  // the base IOS of a d2x slot; 0 when not d2x
+  u16 m_d2x_revision = 0;  // d2x's revision (the slot's TMD version)
+  bool m_d2x_es_config_carried = false;
 
   IOSC m_iosc;
   std::shared_ptr<FS::FileSystem> m_fs;
+  std::shared_ptr<FS::D2xFileSystem> m_d2x_fs;
   std::shared_ptr<WiiSockMan> m_socket_manager;
 };
 
@@ -182,6 +201,7 @@ public:
   u16 GetGidForPPC() const;
 
   bool BootstrapPPC(const std::string& boot_content_path);
+  bool SetupMemoryForThisIOS(MemorySetupType setup_type);
   bool BootIOS(u64 ios_title_id, HangPPC hang_ppc = HangPPC::No,
                const std::string& boot_content_path = {});
   void InitIPC();

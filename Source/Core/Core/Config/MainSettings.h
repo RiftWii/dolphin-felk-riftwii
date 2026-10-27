@@ -194,6 +194,7 @@ extern const Info<std::string> MAIN_LOAD_PATH;
 extern const Info<std::string> MAIN_RESOURCEPACK_PATH;
 extern const Info<std::string> MAIN_FS_PATH;
 extern const Info<std::string> MAIN_WII_SD_CARD_IMAGE_PATH;
+extern const Info<std::string> MAIN_WII_USB_IMAGE_PATH;
 extern const Info<std::string> MAIN_WII_SD_CARD_SYNC_FOLDER_PATH;
 extern const Info<std::string> MAIN_WFS_PATH;
 extern const Info<bool> MAIN_SHOW_LAG;

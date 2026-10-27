@@ -6,18 +6,82 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <utility>
 
 #include <gtest/gtest.h>
 
 #include "Common/CommonTypes.h"
 #include "Common/FileUtil.h"
 #include "Core/IOS/FS/FileSystem.h"
+#include "Core/IOS/FS/FileSystemProxy.h"
 #include "Core/IOS/IOS.h"
 #include "UICommon/UICommon.h"
 
 using namespace IOS::HLE::FS;
 
 constexpr Modes modes{Mode::ReadWrite, Mode::None, Mode::None};
+
+TEST(FileSystem, D2xNandPathBoundsOversizedVectors)
+{
+  constexpr u32 ram_size = 0x01800000;
+  constexpr u32 exram_size = 0x04000000;
+  constexpr size_t capacity = 255;
+  const u32 address = ram_size - static_cast<u32>(capacity);
+  unsigned int reads = 0;
+  const auto path = IOS::HLE::ReadD2xNandPath(address, 0xffffffff, capacity, ram_size, exram_size,
+                                              [&](u32 read_address, size_t length) {
+                                                ++reads;
+                                                EXPECT_EQ(read_address, address);
+                                                EXPECT_EQ(length, capacity);
+                                                return std::string(length, 'a');
+                                              });
+  ASSERT_TRUE(path);
+  EXPECT_EQ(path->size(), capacity);
+  EXPECT_EQ(reads, 1u);
+}
+
+TEST(FileSystem, D2xNandPathEmptyVectorDoesNotReadMemory)
+{
+  const auto path =
+      IOS::HLE::ReadD2xNandPath(0xffffffff, 0, 255, 0x01800000, 0x04000000, [](u32, size_t) {
+        ADD_FAILURE() << "An empty path must not read guest memory.";
+        return std::string{};
+      });
+  ASSERT_TRUE(path);
+  EXPECT_TRUE(path->empty());
+}
+
+TEST(FileSystem, D2xNandPathRejectsInvalidRangesWithoutReading)
+{
+  constexpr u32 ram_size = 0x01800000;
+  constexpr u32 exram_size = 0x04000000;
+  constexpr u32 exram_end = 0x10000000 + exram_size;
+  for (const auto [address, size] :
+       {std::pair{ram_size - 254, 255u}, std::pair{ram_size, 1u}, std::pair{exram_end - 1, 2u},
+        std::pair{0xffffffffu, 0xffffffffu}})
+  {
+    EXPECT_FALSE(
+        IOS::HLE::ReadD2xNandPath(address, size, 255, ram_size, exram_size, [](u32, size_t) {
+          ADD_FAILURE() << "An invalid path range must not read guest memory.";
+          return std::string{};
+        }));
+  }
+}
+
+TEST(FileSystem, D2xNandPathAcceptsMem2AndCachedAliases)
+{
+  for (const u32 address : {0x10000000u, 0x80001000u, 0x90000000u})
+  {
+    const auto path = IOS::HLE::ReadD2xNandPath(address, 12, 255, 0x01800000, 0x04000000,
+                                                [&](u32 read_address, size_t length) {
+                                                  EXPECT_EQ(read_address, address);
+                                                  EXPECT_EQ(length, 12u);
+                                                  return std::string{"/nands/test"};
+                                                });
+    ASSERT_TRUE(path);
+    EXPECT_EQ(*path, "/nands/test");
+  }
+}
 
 class FileSystemTest : public testing::Test
 {
