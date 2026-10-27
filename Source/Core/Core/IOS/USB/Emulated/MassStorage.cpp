@@ -7,6 +7,7 @@
 #include <array>
 #include <cstring>
 
+#include "Common/ChunkFile.h"
 #include "Common/Logging/Log.h"
 #include "Common/Logging/Log.h"
 #include "Core/HW/Memmap.h"
@@ -18,7 +19,19 @@ namespace IOS::HLE::USB
 MassStorage::MassStorage(EmulationKernel& ios)
     : m_ios(ios), m_transport(StorageImage(StorageImage::GetConfiguredPath()))
 {
-  m_id = 0xd01f120000000001;
+  m_id = DEVICE_ID;
+}
+
+void MassStorage::DoState(PointerWrap& p)
+{
+  m_transport.DoState(p);
+  p.Do(m_configuration);
+}
+
+void MassStorage::Reset()
+{
+  m_transport.Reset();
+  m_configuration = 0;
 }
 
 DeviceDescriptor MassStorage::GetDeviceDescriptor() const

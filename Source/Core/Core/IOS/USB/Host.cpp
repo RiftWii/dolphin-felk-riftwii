@@ -62,6 +62,31 @@ void USBHost::UpdateWantDeterminism(const bool new_want_determinism)
 void USBHost::DoState(PointerWrap& p)
 {
   Device::DoState(p);
+  {
+    // The scan thread can change the device list, so keep it stable while saving or loading.
+    std::lock_guard lk(m_devices_mutex);
+    const auto it = m_devices.find(USB::MassStorage::DEVICE_ID);
+    const bool has_storage = it != m_devices.end();
+    bool saved_has_storage = has_storage;
+    p.Do(saved_has_storage);
+    if (saved_has_storage)
+    {
+      if (has_storage)
+      {
+        static_cast<USB::MassStorage&>(*it->second).DoState(p);
+      }
+      else
+      {
+        // Consume the absent drive's state without carrying its command into a future insertion.
+        USB::MassStorage disconnected_storage(GetEmulationKernel());
+        disconnected_storage.DoState(p);
+      }
+    }
+    else if (p.IsReadMode() && has_storage)
+    {
+      static_cast<USB::MassStorage&>(*it->second).Reset();
+    }
+  }
   if (IsOpened() && p.IsReadMode())
   {
     // After a state has loaded, there may be insertion hooks for devices that were

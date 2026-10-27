@@ -9,6 +9,8 @@
 
 #include "Common/CommonTypes.h"
 
+class PointerWrap;
+
 namespace IOS::HLE::USB
 {
 // Each operation opens a shared handle and flushes before returning. No image
@@ -33,6 +35,7 @@ class StorageTransport
 {
 public:
   explicit StorageTransport(StorageImage image);
+  void DoState(PointerWrap& p);
   void Reset();
   int Transfer(bool input, std::span<u8> data);
 

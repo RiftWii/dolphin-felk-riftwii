@@ -9,6 +9,7 @@
 #include <limits>
 #include <utility>
 
+#include "Common/ChunkFile.h"
 #include "Common/IOFile.h"
 #include "Common/Swap.h"
 #include "Core/Config/MainSettings.h"
@@ -73,6 +74,21 @@ bool StorageImage::Write(u32 sector, std::span<const u8> data) const
 
 StorageTransport::StorageTransport(StorageImage image) : m_image(std::move(image))
 {
+}
+
+void StorageTransport::DoState(PointerWrap& p)
+{
+  // The image stays on disk; only the in-flight command belongs in the state.
+  p.Do(m_phase);
+  p.Do(m_data);
+  p.Do(m_offset);
+  p.Do(m_tag);
+  p.Do(m_expected);
+  p.Do(m_residue);
+  p.Do(m_write_sector);
+  p.Do(m_status);
+  p.Do(m_sense_key);
+  p.Do(m_additional_sense);
 }
 
 void StorageTransport::Reset()

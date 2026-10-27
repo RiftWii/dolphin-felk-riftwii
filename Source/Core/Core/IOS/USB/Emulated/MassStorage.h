@@ -11,7 +11,11 @@ namespace IOS::HLE::USB
 class MassStorage final : public Device
 {
 public:
+  static constexpr u64 DEVICE_ID = 0xd01f120000000001;
+
   explicit MassStorage(EmulationKernel& ios);
+  void DoState(PointerWrap& p);
+  void Reset();
   DeviceDescriptor GetDeviceDescriptor() const override;
   std::vector<ConfigDescriptor> GetConfigurations() const override;
   std::vector<InterfaceDescriptor> GetInterfaces(u8 config) const override;

@@ -9,6 +9,7 @@
 
 #include <gtest/gtest.h>
 
+#include "Common/ChunkFile.h"
 #include "Common/Config/Config.h"
 #include "Common/FileUtil.h"
 #include "Common/IOFile.h"
@@ -91,6 +92,29 @@ protected:
     EXPECT_EQ(csw[12], status);
   }
 
+  std::vector<u8> SaveState()
+  {
+    u8* cursor = nullptr;
+    PointerWrap measure(&cursor, 0, PointerWrap::Mode::Measure);
+    m_transport->DoState(measure);
+    std::vector<u8> state(reinterpret_cast<size_t>(cursor));
+    cursor = state.data();
+    PointerWrap writer(&cursor, state.size(), PointerWrap::Mode::Write);
+    m_transport->DoState(writer);
+    EXPECT_TRUE(writer.IsWriteMode());
+    EXPECT_EQ(cursor, state.data() + state.size());
+    return state;
+  }
+
+  void LoadState(std::vector<u8>& state)
+  {
+    u8* cursor = state.data();
+    PointerWrap reader(&cursor, state.size(), PointerWrap::Mode::Read);
+    m_transport->DoState(reader);
+    ASSERT_TRUE(reader.IsReadMode());
+    EXPECT_EQ(cursor, state.data() + state.size());
+  }
+
   std::string m_directory;
   std::string m_path;
   std::unique_ptr<StorageTransport> m_transport;
@@ -151,6 +175,119 @@ TEST_F(USBStorageTest, OutOfRangeCommandReportsSenseAndResidue)
   ASSERT_EQ(m_transport->Transfer(true, sense), 18);
   EXPECT_EQ(sense[2], 5);
   EXPECT_EQ(sense[12], 0x21);
+  CheckStatus();
+}
+
+TEST_F(USBStorageTest, SavedWriteResumesAtOriginalSectorAndOffset)
+{
+  StorageImage image(m_path);
+  std::vector<u8> untouched_sectors(1024);
+  ASSERT_TRUE(image.Read(8, untouched_sectors));
+
+  Begin(MakeCommand(0x2a, 1024, false, 2, 2));
+  std::array<u8, 512> first{};
+  first.fill(0x71);
+  ASSERT_EQ(m_transport->Transfer(false, first), 512);
+  auto state = SaveState();
+
+  std::array<u8, 512> live_second{};
+  live_second.fill(0x32);
+  ASSERT_EQ(m_transport->Transfer(false, live_second), 512);
+  CheckStatus();
+
+  // A later command of the same size must not receive the restored game's data.
+  auto later_command = MakeCommand(0x2a, 1024, false, 8, 2);
+  PutLE32(later_command.data() + 4, 0x87654321);
+  Begin(later_command);
+  LoadState(state);
+  std::array<u8, 512> restored_second{};
+  restored_second.fill(0x53);
+  ASSERT_EQ(m_transport->Transfer(false, restored_second), 512);
+  CheckStatus();
+
+  std::vector<u8> actual(1024);
+  ASSERT_TRUE(image.Read(2, actual));
+  EXPECT_TRUE(std::equal(first.begin(), first.end(), actual.begin()));
+  EXPECT_TRUE(std::equal(restored_second.begin(), restored_second.end(), actual.begin() + 512));
+  ASSERT_TRUE(image.Read(8, actual));
+  EXPECT_EQ(actual, untouched_sectors);
+}
+
+TEST_F(USBStorageTest, SavedReadKeepsBufferedDataAndRemainingLength)
+{
+  StorageImage image(m_path);
+  std::array<u8, 512> expected_second{};
+  ASSERT_TRUE(image.Read(6, expected_second));
+  Begin(MakeCommand(0x28, 1024, true, 5, 2));
+  std::array<u8, 512> first{};
+  ASSERT_EQ(m_transport->Transfer(true, first), 512);
+  auto state = SaveState();
+  std::array<u8, 512> second{};
+  ASSERT_EQ(m_transport->Transfer(true, second), 512);
+  CheckStatus();
+
+  Begin(MakeCommand(0x12, 36, true));
+  std::array<u8, 8> inquiry_prefix{};
+  ASSERT_EQ(m_transport->Transfer(true, inquiry_prefix), 8);
+  std::array<u8, 512> changed_sector{};
+  changed_sector.fill(0xa5);
+  ASSERT_TRUE(image.Write(6, changed_sector));
+
+  LoadState(state);
+  ASSERT_EQ(m_transport->Transfer(true, second), 512);
+  EXPECT_EQ(second, expected_second);
+  CheckStatus();
+  ASSERT_TRUE(image.Read(6, second));
+  EXPECT_EQ(second, changed_sector);
+}
+
+TEST_F(USBStorageTest, SavedStatusAndSenseSurviveLaterCommands)
+{
+  Begin(MakeCommand(0x28, 512, true, 64, 1));
+  std::array<u8, 512> buffer{};
+  ASSERT_EQ(m_transport->Transfer(true, buffer), 0);
+  auto state = SaveState();
+  CheckStatus(1, 512);
+
+  // Consuming the live sense clears it, but loading must bring the saved sense back.
+  Begin(MakeCommand(0x03, 18, true));
+  std::array<u8, 18> sense{};
+  ASSERT_EQ(m_transport->Transfer(true, sense), 18);
+  CheckStatus();
+
+  LoadState(state);
+  CheckStatus(1, 512);
+  Begin(MakeCommand(0x03, 18, true));
+  ASSERT_EQ(m_transport->Transfer(true, sense), 18);
+  EXPECT_EQ(sense[2], 5);
+  EXPECT_EQ(sense[12], 0x21);
+  CheckStatus();
+}
+
+TEST_F(USBStorageTest, SavedStallRequiresResetAfterLoad)
+{
+  auto malformed = MakeCommand(0x00, 0, false);
+  malformed[0] = 0xff;
+  ASSERT_LT(m_transport->Transfer(false, malformed), 0);
+  auto state = SaveState();
+  m_transport->Reset();
+  Begin(MakeCommand(0x00, 0, false));
+  CheckStatus();
+
+  LoadState(state);
+  auto valid = MakeCommand(0x00, 0, false);
+  EXPECT_LT(m_transport->Transfer(false, valid), 0);
+  m_transport->Reset();
+  Begin(valid);
+  CheckStatus();
+}
+
+TEST_F(USBStorageTest, SavedCommandPhaseDiscardsLaterPendingWrite)
+{
+  auto state = SaveState();
+  Begin(MakeCommand(0x2a, 512, false, 2, 1));
+  LoadState(state);
+  Begin(MakeCommand(0x00, 0, false));
   CheckStatus();
 }
 
