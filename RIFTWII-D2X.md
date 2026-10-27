@@ -32,6 +32,38 @@ cIOS that couldn't mount the card, and d2x saves for disc games.
 - RiftWii's logs (`boot.log`, `autorun.log`) must show the same steps a
   real Wii's do, where we have real logs to compare.
 
+## Savestates
+
+A savestate keeps what brings a d2x game's disc back: which image
+the game is read from (SD or USB), the fragment list and the game
+ID. Loading opens that image as it is now and rebuilds the disc
+before Dolphin checks for an inserted disc
+(`Source/Core/Core/HW/DVD/DVDInterface.cpp`).
+
+- A state from another game ID is refused first with `State belongs
+  to a different game (ID ...)`, so RiftWii's menu cannot load a
+  game's state.
+- If the image is missing, or the rebuilt disc is another game, the
+  load is refused with `The d2x game could not be restored`, and
+  Dolphin undoes it.
+- A state saved when one side is d2x and the other isn't, or when
+  both differ in IOS features while one of them is d2x, is refused
+  with `This savestate was saved under a different IOS (d2x or IOS
+  features differ)` because a load does not rebuild the IOS file
+  system and devices (`Source/Core/Core/IOS/IOS.cpp`).
+- Like any Dolphin savestate, one made with a different savestate
+  version (`STATE_VERSION` in `Source/Core/Core/State.cpp`, now
+  175) can't be loaded.
+
+With `Automatically Sync with Folder` on (`Config > Wii > SD Card`),
+Dolphin builds a fresh SD image at every start. The game's file can
+land elsewhere on the new image, and if it does, the saved fragment
+list misses it and a d2x game's state from before the restart is
+refused. Turn sync off before the next start of Dolphin to keep
+those states. Once the image has been rebuilt, a state from before
+needs the old image back, or a new state. Tested on a Mac with Mario
+Kart Wii, 27 October 2026.
+
 ## Building
 
 As the `es-identify` branch: Visual Studio 2022, `Source/dolphin-emu.sln`,
