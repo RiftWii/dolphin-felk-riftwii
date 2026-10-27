@@ -4,6 +4,7 @@
 #include "Core/IOS/FS/D2xFileSystem.h"
 
 #include <algorithm>
+#include <cctype>
 #include <string_view>
 #include <utility>
 
@@ -76,25 +77,40 @@ std::string UnescapeName(std::string_view name)
   return unescaped;
 }
 
-// FatFs interprets dot components and backslashes itself. Do not allow them to
-// escape the selected NAND folder, even though the host backend is permissive.
+// FatFs ends paths at control characters, skips empty components and drops trailing dots and
+// spaces, and interprets backslashes itself. Refuse all of them, so a checked path names exactly
+// one object inside the selected NAND folder, even though the host backend is permissive.
 bool IsSafePath(std::string_view path)
 {
   if (!path.starts_with('/') || path.find('\\') != std::string_view::npos ||
-      path.find('\0') != std::string_view::npos)
+      std::any_of(path.begin(), path.end(),
+                  [](char c) { return static_cast<unsigned char>(c) < 0x20; }))
     return false;
+  if (path == "/")
+    return true;
   while (!path.empty())
   {
     path.remove_prefix(1);
     const auto separator = path.find('/');
     const auto component = path.substr(0, separator);
-    if (component == "." || component == "..")
+    if (component.empty() || component.ends_with('.') || component.ends_with(' '))
       return false;
     if (separator == std::string_view::npos)
       break;
     path.remove_prefix(separator);
   }
   return true;
+}
+
+// FatFs matches names without regard to ASCII case.
+bool IsInsideFolder(std::string_view path, std::string_view folder)
+{
+  if (path.size() <= folder.size() || path[folder.size()] != '/')
+    return false;
+  return std::equal(folder.begin(), folder.end(), path.begin(), [](char a, char b) {
+    return std::tolower(static_cast<unsigned char>(a)) ==
+           std::tolower(static_cast<unsigned char>(b));
+  });
 }
 
 std::string GetImagePath(Drive drive)
@@ -800,6 +816,10 @@ ResultCode D2xFileSystem::Rename(Uid uid, Gid gid, const std::string& old_path,
     int result = f_stat(source.c_str(), &info);
     if (result != FR_OK || source == destination)
       return result;
+    // f_rename doesn't stop a folder moving into itself, which would cut it off from the
+    // card; a move onto an ancestor would delete the source with the destination.
+    if (IsInsideFolder(destination, source) || IsInsideFolder(source, destination))
+      return static_cast<int>(FR_INVALID_PARAMETER);
     // d2x replaces existing files and recursively removes destination folders.
     result = f_stat(destination.c_str(), &info);
     if (result == FR_OK)
