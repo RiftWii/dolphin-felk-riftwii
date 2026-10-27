@@ -102,7 +102,8 @@ bool IsSafePath(std::string_view path)
   return true;
 }
 
-// FatFs matches names without regard to ASCII case.
+// FatFs matches names without regard to ASCII case. It also finds a folder by its 8.3 short
+// name (ABCDEF~1), which this text comparison can't see; only a guest guessing one gets past it.
 bool IsInsideFolder(std::string_view path, std::string_view folder)
 {
   if (path.size() <= folder.size() || path[folder.size()] != '/')
@@ -467,7 +468,11 @@ s32 D2xFileSystem::SetMode(u32 mode, const std::string& path)
     return -101;
   // The new mode's drive; the active mode keeps its own until this succeeds.
   const Drive drive = (mode & 2) != 0 ? Drive::USB : Drive::SD;
-  if ((!path.empty() && !IsSafePath(path)) || path.find(':') != std::string::npos ||
+  // Some loaders name the folder with a trailing slash; FatFs skips the empty component it leaves.
+  std::string_view folder = path;
+  if (folder.size() > 1 && folder.ends_with('/'))
+    folder.remove_suffix(1);
+  if ((!folder.empty() && !IsSafePath(folder)) || path.find(':') != std::string::npos ||
       path.size() > 255)
     return -101;
   if (!VolumeOf(drive).mounted)

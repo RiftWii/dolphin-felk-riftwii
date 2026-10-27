@@ -617,6 +617,19 @@ TEST_F(D2xFileSystemTest, UnsafePathsAreRejected)
   EXPECT_TRUE(m_fs->GetMetadata(0, 0, "/title/a"));
 }
 
+TEST_F(D2xFileSystemTest, SafePathsStillWork)
+{
+  EXPECT_TRUE(m_fs->ReadDirectory(0, 0, "/"));
+  for (const char* path : {"/title/a.b", "/title/a b"})
+    EXPECT_EQ(m_fs->CreateFile(0, 0, path, 0, modes), ResultCode::Success);
+  for (const char* path : {"/title/..", "/title/./a", "/title/a.", "/title//a"})
+    EXPECT_EQ(m_fs->CreateFile(0, 0, path, 0, modes), ResultCode::NotFound);
+  EXPECT_EQ(m_fs->SetMode(0x101, "/nands/slash/"), 0);
+  EXPECT_EQ(m_fs->SetMode(0x101, std::string("/nands/") + '\x01'), -101);
+  EXPECT_EQ(m_fs->SetMode(0x101, "/nands//x"), -101);
+  ASSERT_EQ(m_fs->SetMode(0x101, ""), 0);
+}
+
 TEST_F(D2xFileSystemTest, RenameIntoOwnSubfolderOrAncestorIsRefused)
 {
   ASSERT_EQ(m_fs->CreateDirectory(0, 0, "/title/a", 0, modes), ResultCode::Success);
