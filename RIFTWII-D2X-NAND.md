@@ -90,12 +90,17 @@ emulating, RiftWii touches neither libfat nor the card.
 
 ## 2. What is implemented (this branch)
 
-- `Source/Core/Core/IOS/Fat/Fat.h`, `Fat.cpp` (new): `FatDevice`, answers
-  0xF0/0xF1 as in 1.1. Mounted state = Dolphin's SD-card setting
-  (`MAIN_WII_SD_CARD` inserted or not) plus a `m_card_started` flag: 0xF0
-  with no card -> -4, else flag set and 0; 0xF1 answers 1 and clears the
-  flag, or -4 when the card was not started. Other ioctls/ioctlvs -> -4. Every call is
-  `INFO_LOG_FMT(IOS, …)`. Savestated.
+- `Source/Core/Core/IOS/Fat/Fat.h`, `Fat.cpp` (new): `FatDevice`,
+  answers 0xF0/0xF1 (SD) and 0xF2/0xF3 (USB). Mount (0xF0/0xF2): with
+  no SD card inserted / no valid USB image -> -4; otherwise the
+  drive's started flag (`m_card_started` / `m_usb_started`) is set
+  and the answer is `D2xFileSystem::Mount`'s (0, or -101 when the
+  card can't be mounted). Unmount (0xF1/0xF3): answers 1 and clears
+  the flag when the driver was started, or when d2x's file system
+  has that volume mounted (after a redirected reload carrying NAND
+  emulation, or a setmode that mounted it); otherwise -4. Other
+  ioctls/ioctlvs -> -4. Every call is logged with
+  `INFO_LOG_FMT(IOS, ...)`. Savestated.
 - `IOS.cpp`: `FatDevice("fat")` registered in `AddStaticDevices()` only when
   `IsD2x()`; `OpenDevice` routes the bare `"fat"` path to it (d2x registers a
   non-`/dev/` name; without this it fell into "Unknown device"). On non-d2x
@@ -110,7 +115,8 @@ emulating, RiftWii touches neither libfat nor the card.
   answers 0. Stored in `FSCore`, so it dies with the IOS instance like d2x's
   `config`, and is savestated.
 - ioctlv 100 answers -6 while a title runs, as d2x does (d2x lets ES turn
-  the emulation off then; Dolphin's ES never asks).
+  the emulation off then; this ES does so on every Wii Menu launch, as
+  d2x does).
 - d2x hands the folder to its FAT module only the first time the emulation
   is switched on in an IOS session (`FAT_Init` returns early once the module
   is open); a later ioctlv 100 with another folder changes only the FFS
@@ -198,5 +204,10 @@ is linkable with custom disk callbacks (`Common/FatFsUtil.h`,
 - `Source/Core/Core/IOS/FS/D2xFileSystem.{h,cpp}` (new: the redirect)
 - `Source/Core/Core/IOS/SDIO/SDIOSlot0.{h,cpp}` (card image flush, no
   buffering while d2x runs)
+- `Source/Core/Core/IOS/ES/ES.cpp` (NAND emulation carried across d2x's
+  redirected reload, switched off on Wii Menu launches)
+- `Source/Core/Core/IOS/USB/D2xUSB.{h,cpp}`, `USBStorage.{h,cpp}`,
+  `Source/Core/Common/IOFile.{h,cpp}` and the `MainSettings` USB image
+  path (USB NAND mode)
 - `Source/UnitTests/Core/IOS/FS/D2xFileSystemTest.cpp` (new: the d2x unit tests)
 - `RIFTWII-D2X-NAND.md` (this file)

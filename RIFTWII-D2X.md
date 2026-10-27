@@ -56,7 +56,8 @@ before Dolphin checks for an inserted disc
   files on the card aren't compared, so a card whose files changed
   still loads.
 - The emulated USB drive records its image's path, size and a
-  fingerprint of its first sectors; a state saved mid-command
+  checksum of sector 0 and of the first sector of each MBR partition; a
+  state saved mid-command
   against a changed image is refused with `This savestate cannot
   be loaded because the USB image has changed while a USB command
   was in progress`, while an idle drive is simply reset
