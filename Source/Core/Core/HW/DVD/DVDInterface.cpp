@@ -8,8 +8,12 @@
 #include <cmath>
 #include <memory>
 #include <optional>
+#include <span>
 #include <string>
+#include <utility>
 #include <vector>
+
+#include <fmt/format.h>
 
 #include "AudioCommon/AudioCommon.h"
 
@@ -18,6 +22,8 @@
 #include "Common/ChunkFile.h"
 #include "Common/CommonTypes.h"
 #include "Common/Config/Config.h"
+#include "Common/FileUtil.h"
+#include "Common/IOFile.h"
 #include "Common/Logging/Log.h"
 
 #include "Core/AchievementManager.h"
@@ -37,10 +43,12 @@
 #include "Core/HW/SystemTimers.h"
 #include "Core/IOS/DI/DI.h"
 #include "Core/IOS/IOS.h"
+#include "Core/IOS/USB/USBStorage.h"
 #include "Core/Movie.h"
 #include "Core/System.h"
 
 #include "DiscIO/Blob.h"
+#include "DiscIO/D2xBlob.h"
 #include "DiscIO/DiscUtils.h"
 #include "DiscIO/Enums.h"
 #include "DiscIO/VolumeDisc.h"
@@ -88,6 +96,38 @@ DVDInterface::DVDInterface(Core::System& system) : m_system(system)
 DVDInterface::~DVDInterface() = default;
 
 static u64 PackFinishExecutingCommandUserdata(ReplyType reply_type, DIInterruptType interrupt_type);
+static u64 GetDiscEndOffset(const DiscIO::VolumeDisc& disc);
+
+static s32 CreateD2xDisc(u32 device, std::span<const u8> list, std::string* error,
+                         std::unique_ptr<DiscIO::VolumeDisc>* out_disc)
+{
+  const auto refuse = [error](s32 result, const char* reason) {
+    if (error)
+      *error = reason;
+    return result;
+  };
+  std::string image_path;
+  if (device == 1)
+    image_path = IOS::HLE::USB::StorageImage::GetConfiguredPath();
+  else if (device == 2)
+    image_path = File::GetUserPath(F_WIISDCARDIMAGE_IDX);
+  else
+    return refuse(-1, "unknown fragment device");
+
+  // The read-only DVD handle must allow the loader to reopen the card for log writes.
+  File::IOFile card(image_path, "rb", File::SharedAccess::ReadWrite);
+  if (!card)
+    return refuse(-4, "backing image could not be opened");
+  auto reader = DiscIO::D2xBlobReader::Create(std::move(card), list, error);
+  if (!reader)
+    return -3;
+  auto disc = DiscIO::CreateDisc(std::move(reader));
+  if (!disc)
+    return refuse(-3, "fragment list does not contain a recognized disc header");
+
+  *out_disc = std::move(disc);
+  return 0;
+}
 
 void DVDInterface::DoState(PointerWrap& p)
 {
@@ -120,6 +160,38 @@ void DVDInterface::DoState(PointerWrap& p)
   p.Do(m_read_buffer_end_offset);
 
   p.Do(m_disc_path_to_insert);
+
+  const bool had_d2x_disc = !m_d2x_fragment_list.empty();
+  p.Do(m_d2x_device);
+  p.Do(m_d2x_fragment_list);
+  p.Do(m_d2x_game_id);
+  if (p.IsReadMode() && !m_d2x_fragment_list.empty())
+  {
+    std::unique_ptr<DiscIO::VolumeDisc> disc;
+    std::string error;
+    if (CreateD2xDisc(m_d2x_device, m_d2x_fragment_list, &error, &disc) == 0 &&
+        disc->GetGameID() != m_d2x_game_id)
+    {
+      error = fmt::format("the image now holds {} instead of {}", disc->GetGameID(), m_d2x_game_id);
+      disc.reset();
+    }
+    if (!disc)
+    {
+      // Dolphin undoes the load, which also puts the recipe back.
+      ERROR_LOG_FMT(DVDINTERFACE, "Failed to restore d2x disc from savestate: {}", error);
+      Core::DisplayMessage(fmt::format("The d2x game could not be restored: {}", error), 4000);
+      p.SetVerifyMode();
+      return;
+    }
+    m_disc_end_offset = GetDiscEndOffset(*disc);
+    // Restore before DVDThread checks for a disc, without the effects of a user disc swap.
+    m_system.GetDVDThread().SetDisc(std::move(disc));
+  }
+  else if (p.IsReadMode() && had_d2x_disc)
+  {
+    // The state predates the d2x game, so its virtual disc can't be the one the state expects.
+    m_system.GetDVDThread().SetDisc(nullptr);
+  }
 
   m_system.GetDVDThread().DoState(p);
 
@@ -256,6 +328,10 @@ void DVDInterface::Init()
 {
   ASSERT(!IsDiscInside());
 
+  m_d2x_device = 0;
+  m_d2x_fragment_list.clear();
+  m_d2x_game_id.clear();
+
   m_system.GetDVDThread().Start();
 
   m_DISR.Hex = 0;
@@ -363,6 +439,10 @@ static u64 GetDiscEndOffset(const DiscIO::VolumeDisc& disc)
 void DVDInterface::SetDisc(std::unique_ptr<DiscIO::VolumeDisc> disc,
                            std::optional<std::vector<std::string>> auto_disc_change_paths = {})
 {
+  m_d2x_device = 0;
+  m_d2x_fragment_list.clear();
+  m_d2x_game_id.clear();
+
   bool had_disc = IsDiscInside();
   bool has_disc = static_cast<bool>(disc);
 
@@ -408,6 +488,25 @@ void DVDInterface::SetDisc(std::unique_ptr<DiscIO::VolumeDisc> disc,
   SetLidOpen();
 
   ResetDrive(false);
+}
+
+s32 DVDInterface::SetD2xDisc(u32 device, std::vector<u8> fragment_list, std::string* error,
+                             u64* disc_size)
+{
+  std::unique_ptr<DiscIO::VolumeDisc> disc;
+  const s32 result = CreateD2xDisc(device, fragment_list, error, &disc);
+  if (result != 0)
+    return result;
+
+  const u64 size = disc->GetDataSize();
+  std::string game_id = disc->GetGameID();
+  SetDisc(std::move(disc), std::vector<std::string>{});
+  m_d2x_device = device;
+  m_d2x_fragment_list = std::move(fragment_list);
+  m_d2x_game_id = std::move(game_id);
+  if (disc_size)
+    *disc_size = size;
+  return 0;
 }
 
 bool DVDInterface::IsDiscInside() const

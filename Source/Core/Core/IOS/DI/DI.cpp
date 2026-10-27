@@ -4,12 +4,12 @@
 #include "Core/IOS/DI/DI.h"
 
 #include <memory>
+#include <utility>
 #include <vector>
 
 #include "Common/Assert.h"
 #include "Common/ChunkFile.h"
 #include "Common/CommonTypes.h"
-#include "Common/FileUtil.h"
 #include "Common/Logging/Log.h"
 #include "Common/MsgHandler.h"
 #include "Core/Config/MainSettings.h"
@@ -24,9 +24,9 @@
 #include "Core/IOS/ES/ES.h"
 #include "Core/IOS/ES/Formats.h"
 #include "Core/IOS/SDIO/SDIOSlot0.h"
+#include "Core/IOS/USB/USBStorage.h"
 #include "Core/System.h"
 #include "DiscIO/D2xBlob.h"
-#include "Core/IOS/USB/USBStorage.h"
 #include "DiscIO/Volume.h"
 #include "DiscIO/VolumeDisc.h"
 
@@ -214,23 +214,15 @@ std::optional<DIDevice::DIResult> DIDevice::ConfigureD2xFragments(const IOCtlReq
   if (device == 2 && sdio && !sdio->FlushCardImage())
     return refuse(-4, "could not flush the SDIO image handle");
 
-  const auto list = std::span<const u8>(memory.GetPointerForRange(address, size), size);
+  const u8* list = memory.GetPointerForRange(address, size);
+  std::vector<u8> fragment_list(list, list + size);
   std::string error;
-  // The read-only DVD handle must allow the loader to reopen the card for log writes.
-  const std::string image_path = device == 1 ? USB::StorageImage::GetConfiguredPath() :
-                                                File::GetUserPath(F_WIISDCARDIMAGE_IDX);
-  File::IOFile card(image_path, "rb", File::SharedAccess::ReadWrite);
-  if (!card)
-    return refuse(-4, "backing image could not be opened");
-  auto reader = DiscIO::D2xBlobReader::Create(std::move(card), list, &error);
-  if (!reader)
-    return refuse(-3, error);
-  const u64 disc_size = reader->GetDataSize();
-  auto disc = DiscIO::CreateDisc(std::move(reader));
-  if (!disc)
-    return refuse(-3, "fragment list does not contain a recognized disc header");
+  u64 disc_size = 0;
+  const s32 result =
+      system.GetDVDInterface().SetD2xDisc(device, std::move(fragment_list), &error, &disc_size);
+  if (result != 0)
+    return refuse(result, error);
 
-  system.GetDVDInterface().SetDisc(std::move(disc), std::vector<std::string>{});
   system.GetDVDInterface().ResetDrive(true);
   ChangePartition(DiscIO::PARTITION_NONE);
   m_d2x_fragments = true;

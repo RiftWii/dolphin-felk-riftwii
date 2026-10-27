@@ -10,6 +10,7 @@
 
 #include <gtest/gtest.h>
 
+#include "Common/ChunkFile.h"
 #include "Common/FileUtil.h"
 #include "Common/IOFile.h"
 #include "Common/Swap.h"
@@ -70,6 +71,41 @@ TEST(D2xBlob, ReadsPartialSectorsAcrossFragmentsAndSparseHoles)
   std::array<u8, 6 * 512> actual;
   ASSERT_TRUE(copy->Read(0, actual.size(), actual.data()));
   EXPECT_EQ(actual, expected);
+}
+
+TEST(D2xBlob, SavestateRoundtripPreservesDeviceAndFragments)
+{
+  u32 device = 2;
+  auto list = EncodeList({6, 2, 2, 1, 5, 2, 4, 1, 1});
+  std::string error;
+  auto original = DiscIO::D2xBlobReader::Create(MakeCard(), list, &error);
+  ASSERT_NE(original, nullptr) << error;
+
+  std::vector<u8> state(2 * sizeof(u32) + list.size());
+  u8* cursor = state.data();
+  PointerWrap writer(&cursor, state.size(), PointerWrap::Mode::Write);
+  writer.Do(device);
+  writer.Do(list);
+  ASSERT_TRUE(writer.IsWriteMode());
+
+  u32 restored_device = 0;
+  std::vector<u8> restored_list;
+  cursor = state.data();
+  PointerWrap reader(&cursor, state.size(), PointerWrap::Mode::Read);
+  reader.Do(restored_device);
+  reader.Do(restored_list);
+  ASSERT_TRUE(reader.IsReadMode());
+  EXPECT_EQ(restored_device, device);
+  EXPECT_EQ(restored_list, list);
+
+  auto restored = DiscIO::D2xBlobReader::Create(MakeCard(), restored_list, &error);
+  ASSERT_NE(restored, nullptr) << error;
+  EXPECT_EQ(restored->GetDataSize(), original->GetDataSize());
+  std::array<u8, 6 * 512> original_bytes;
+  std::array<u8, 6 * 512> restored_bytes;
+  ASSERT_TRUE(original->Read(0, original_bytes.size(), original_bytes.data()));
+  ASSERT_TRUE(restored->Read(0, restored_bytes.size(), restored_bytes.data()));
+  EXPECT_EQ(restored_bytes, original_bytes);
 }
 
 TEST(D2xBlob, RejectsReadsOutsideDiscWithoutChangingOutput)
