@@ -114,8 +114,8 @@ emulating, RiftWii touches neither libfat nor the card.
   is switched on in an IOS session (`FAT_Init` returns early once the module
   is open); a later ioctlv 100 with another folder changes only the FFS
   plugin's copy. RiftWii switches it on once per launch.
-- Not implemented: ioctlv 101, ioctl 100, USB modes, and d2x's `"$"`
-  relative opens. The redirect itself is in section 3.
+- Not implemented: ioctlv 101, ioctl 100, and d2x's `"$"` relative
+  opens. The redirect itself is in section 3; USB came later (section 3).
 
 ## 3. Redirect design
 
@@ -126,7 +126,11 @@ mounts the card image with FatFs, does its work and unmounts, so no
 cache outlives a request. Tested with RiftWii: Super Mario Bros. (NES VC)
 started from `sd:/nands/test` and wrote its save to the card, which was
 still there after Dolphin closed and synced the card back to its folder.
-Not done: USB, ioctlv 101, ioctl 100, d2x's per-game fixes.
+USB (added after this step): the fat module's 0xF2/0xF3 mount the USB
+drive and NAND mode 2 emulates the NAND from it, on the disk image set
+with `Dolphin.General.WiiUSBPath` (see RIFTWII-D2X.md, step 4). The
+emulated NAND uses the drive its mode names, not the drive that was
+mounted last. Not done: ioctlv 101, ioctl 100, d2x's per-game fixes.
 
 The options as they were weighed:
 
@@ -170,7 +174,7 @@ is linkable with custom disk callbacks (`Common/FatFsUtil.h`,
 
 ## 4. Gaps / follow-ups
 
-- No ioctlv 101 (`GETMODE`), no ioctl 100, no `"$"` relative opens, no USB.
+- No ioctlv 101 (`GETMODE`), no ioctl 100, no `"$"` relative opens.
 - Savestates store the mode, folder, the fat module's state and the open
   emulated files; `SavestateRestoresRoutingAndHandleOffsets` tests the
   routing and file offsets, but loading a state in a running game is

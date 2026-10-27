@@ -6,12 +6,20 @@
 #include <array>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <string>
 
 #include "Core/IOS/FS/FileSystem.h"
 
 namespace IOS::HLE::FS
 {
+// The two drives d2x's FAT module and NAND emulation can use.
+enum class Drive : u32
+{
+  SD = 0,
+  USB = 1,
+};
+
 // One filesystem for both ES and /dev/fs. Real-NAND handles retain their original
 // numbers; the separate d2x handle range remains valid across mode changes.
 class D2xFileSystem final : public FileSystem
@@ -54,6 +62,13 @@ public:
   void SetNandRedirects(std::vector<NandRedirect> redirects) override;
 
 private:
+  // A mounted FAT volume on one of the two drives.
+  struct Volume
+  {
+    bool mounted = false;
+    u32 partition_offset = 0;
+  };
+
   struct Handle
   {
     bool opened = false;
@@ -61,13 +76,17 @@ private:
     std::string path;
     std::string fat_path;
     u32 offset = 0;
-    u32 device = 0;
+    Drive drive = Drive::SD;
   };
 
   // No FatFs objects survive a request: the SDIO sector interface and other
   // FatFs users must never see stale directory, FAT, or file-data caches.
   ResultCode Run(const std::string& operation, const std::string& path,
-                 const std::function<int()>& request, u32 device = 2);
+                 const std::function<int()>& request,
+                 std::optional<Drive> drive = std::nullopt);
+  // The drive the NAND emulation uses: the one d2x's mode names (bit 2: USB).
+  Drive RedirectDrive() const;
+  Volume& VolumeOf(Drive drive) { return m_volumes[static_cast<size_t>(drive)]; }
   std::string BuildPath(const std::string& path) const;
   Handle* GetHandle(Fd fd);
   Result<u32> Transfer(Fd fd, Mode access, u8* read_buffer, const u8* write_buffer, u32 size);
@@ -79,13 +98,7 @@ private:
   std::function<Gid()> m_get_gid;
   std::function<bool()> m_is_disc_title;
   std::array<Handle, 20> m_handles{};
-  struct Volume
-  {
-    bool mounted = false;
-    u32 partition_offset = 0;
-  };
   std::array<Volume, 2> m_volumes{};
-  u32 m_device = 0;
   u32 m_mode = 0;
   std::string m_nand_path;
 };

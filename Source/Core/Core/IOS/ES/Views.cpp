@@ -46,7 +46,9 @@ IPCReply ESDevice::GetTicketViewCount(const IOCtlVRequest& request)
 
   const u64 TitleID = memory.Read_U64(request.in_vectors[0].address);
 
-  const ES::TicketReader ticket = m_core.FindSignedTicket(TitleID);
+  ES::TicketReader ticket = m_core.FindSignedTicket(TitleID);
+  if (!ticket.IsValid())
+    ticket = D2xMissingTitleTicket(TitleID);
   u32 view_count = ticket.IsValid() ? static_cast<u32>(ticket.GetNumberOfTickets()) : 0;
 
   if (!IsEmulatedOrD2xSlot(TitleID))
@@ -78,7 +80,9 @@ IPCReply ESDevice::GetTicketViews(const IOCtlVRequest& request)
   const u64 TitleID = memory.Read_U64(request.in_vectors[0].address);
   const u32 maxViews = memory.Read_U32(request.in_vectors[1].address);
 
-  const ES::TicketReader ticket = m_core.FindSignedTicket(TitleID);
+  ES::TicketReader ticket = m_core.FindSignedTicket(TitleID);
+  if (!ticket.IsValid())
+    ticket = D2xMissingTitleTicket(TitleID);
 
   if (!IsEmulatedOrD2xSlot(TitleID))
   {

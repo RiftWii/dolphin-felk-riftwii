@@ -32,6 +32,10 @@ public:
   FSCore& operator=(FSCore&& other) = delete;
   ~FSCore();
 
+  // d2x's NAND emulation off: mode 0 of ioctlv 100, and every Wii Menu launch.
+  void StopD2xNandEmulation();
+  bool IsD2xNandEmulated() const { return m_d2x_mode != 0; }
+
   class ScopedFd
   {
   public:

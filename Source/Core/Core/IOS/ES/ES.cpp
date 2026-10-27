@@ -544,6 +544,8 @@ void ESDevice::DoState(PointerWrap& p)
     context.DoState(p);
 
   p.Do(m_pending_ppc_boot_content_path);
+  // d2x's ES settings outlive this instance, but a savestate restores them too.
+  p.Do(s_d2x);
 }
 
 ESDevice::ContextArray::iterator ESDevice::FindActiveContext(s32 fd)
@@ -847,6 +849,32 @@ IPCReply ESDevice::D2xSetFakeSystemMenuLaunch(const IOCtlVRequest& request)
   return IPCReply(IPC_SUCCESS);
 }
 
+// d2x's answer for a Wii Menu whose ticket is missing (its
+// __ES_FixMissingTitle): with a stand-in set, the stand-in's ticket from the
+// real NAND. Whole-NAND emulation hides the real Wii Menu, and a game's
+// return to it asks for its ticket views before ES_Launch.
+ES::TicketReader ESDevice::D2xMissingTitleTicket(u64 title_id)
+{
+  if (!GetEmulationKernel().IsD2x() || title_id != Titles::SYSTEM_MENU ||
+      s_d2x.system_menu_stand_in == 0)
+  {
+    return {};
+  }
+
+  const u64 stand_in = s_d2x.system_menu_stand_in;
+  const auto file = GetEmulationKernel().GetRealNandFS()->OpenFile(
+      PID_KERNEL, PID_KERNEL, Common::GetTicketFileName(stand_in), FS::Mode::Read);
+  if (!file)
+    return {};
+  std::vector<u8> signed_ticket(file->GetStatus()->size);
+  if (!file->Read(signed_ticket.data(), signed_ticket.size()))
+    return {};
+
+  NOTICE_LOG_FMT(IOS_ES, "d2x: the Wii Menu's ticket is missing; answering with {:016x}'s",
+                 stand_in);
+  return ES::TicketReader{std::move(signed_ticket)};
+}
+
 // What d2x launches for an ES_Launch of `title_id`: the stand-in for the Wii
 // Menu, or its own slot for a disc game's first IOS reload while the block is on.
 u64 ESDevice::D2xLaunchTarget(u64 title_id)
@@ -856,7 +884,14 @@ u64 ESDevice::D2xLaunchTarget(u64 title_id)
 
   if (title_id == Titles::SYSTEM_MENU)
   {
-    // d2x turns its NAND emulation off here first (step 2 of RIFTWII-D2X.md).
+    // d2x turns its NAND emulation off first, with or without a stand-in, so
+    // the title's TMD and ticket come from the real NAND (step 2 of
+    // RIFTWII-D2X.md).
+    if (GetEmulationKernel().GetFSCore().IsD2xNandEmulated())
+    {
+      NOTICE_LOG_FMT(IOS_ES, "d2x: NAND emulation off for the Wii Menu launch");
+      GetEmulationKernel().GetFSCore().StopD2xNandEmulation();
+    }
     if (s_d2x.system_menu_stand_in != 0)
     {
       NOTICE_LOG_FMT(IOS_ES, "d2x: launching {:016x} in place of the Wii Menu",
