@@ -866,12 +866,10 @@ ResultCode D2xFileSystem::Rename(Uid uid, Gid gid, const std::string& old_path,
     int result = f_stat(source.c_str(), &info);
     if (result != FR_OK || source == destination)
       return result;
-    // f_rename doesn't stop a folder moving into itself, which would cut it off from the
-    // card; a move onto an ancestor would delete the source with the destination.
-    const std::string resolved_source = ResolveNames(source);
-    const std::string resolved_destination = ResolveNames(destination);
-    if (IsInsideFolder(resolved_destination, resolved_source) ||
-        IsInsideFolder(resolved_source, resolved_destination))
+    // f_rename doesn't stop a folder moving into itself, which would cut it off from the card
+    // image. A move onto the folder's own parent, or a capitals-only rename, deletes it as d2x
+    // does (decided on PR #1).
+    if (IsInsideFolder(ResolveNames(destination), ResolveNames(source)))
       return static_cast<int>(FR_INVALID_PARAMETER);
     // d2x replaces existing files and recursively removes destination folders.
     result = f_stat(destination.c_str(), &info);

@@ -630,7 +630,7 @@ TEST_F(D2xFileSystemTest, SafePathsStillWork)
   ASSERT_EQ(m_fs->SetMode(0x101, ""), 0);
 }
 
-TEST_F(D2xFileSystemTest, RenameIntoOwnSubfolderOrAncestorIsRefused)
+TEST_F(D2xFileSystemTest, RenameIntoOwnSubfolderIsRefused)
 {
   ASSERT_EQ(m_fs->CreateDirectory(0, 0, "/title/abcdefghij", 0, modes), ResultCode::Success);
   EXPECT_EQ(m_fs->Rename(0, 0, "/title/abcdefghij", "/title/ABCDEF~1/c"), ResultCode::Invalid);
@@ -640,7 +640,6 @@ TEST_F(D2xFileSystemTest, RenameIntoOwnSubfolderOrAncestorIsRefused)
   ASSERT_EQ(m_fs->CreateFile(0, 0, "/title/a/b/f", 0, modes), ResultCode::Success);
   EXPECT_EQ(m_fs->Rename(0, 0, "/title/a", "/title/a/c"), ResultCode::Invalid);
   EXPECT_EQ(m_fs->Rename(0, 0, "/title/a", "/title/A/c"), ResultCode::Invalid);
-  EXPECT_EQ(m_fs->Rename(0, 0, "/title/a/b", "/title/a"), ResultCode::Invalid);
   EXPECT_TRUE(m_fs->GetMetadata(0, 0, "/title/a/b/f"));
 }
 }  // namespace
