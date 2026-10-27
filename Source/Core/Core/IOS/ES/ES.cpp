@@ -41,7 +41,7 @@ namespace
 {
 // RiftWii's tests (RIFTWII-D2X.md step 3): d2x's ES settings. d2x saves them
 // across the IOS reloads it redirects, so they live outside the ES instance,
-// which a reload replaces. Cleared when a slot that isn't d2x boots.
+// which a reload replaces. Cleared at every other IOS boot, as d2x does.
 struct D2xEsConfig
 {
   u32 fake_launch = 0;       // ioctlv 0xA0's mode: a disc game's IOS reload restarts the cIOS
@@ -132,7 +132,8 @@ ESCore::~ESCore() = default;
 ESDevice::ESDevice(EmulationKernel& ios, ESCore& core, const std::string& device_name)
     : EmulationDevice(ios, device_name), m_core(core)
 {
-  if (!ios.IsD2x())
+  // d2x keeps these settings only across the reload it redirects.
+  if (!ios.IsD2x() || !ios.HasCarriedD2xEsConfig())
     s_d2x = {};
 
   auto& system = ios.GetSystem();
@@ -558,6 +559,7 @@ void ESDevice::DoState(PointerWrap& p)
   p.Do(d2x_carry.nand_config.volume_offsets[1]);
   p.Do(d2x_carry.di_fragments);
   p.Do(d2x_carry.di_disable_reset);
+  p.Do(d2x_carry.es_config);
 }
 
 ESDevice::ContextArray::iterator ESDevice::FindActiveContext(s32 fd)
@@ -884,7 +886,11 @@ ES::TicketReader ESDevice::D2xMissingTitleTicket(u64 title_id)
       PID_KERNEL, PID_KERNEL, Common::GetTicketFileName(stand_in), FS::Mode::Read);
   if (!file)
     return {};
-  std::vector<u8> signed_ticket(file->GetStatus()->size);
+  const auto status = file->GetStatus();
+  // A ticket with its views is a few KiB; refuse anything implausible.
+  if (!status || status->size == 0 || status->size > 0x10000)
+    return {};
+  std::vector<u8> signed_ticket(status->size);
   if (!file->Read(signed_ticket.data(), signed_ticket.size()))
     return {};
 
@@ -926,6 +932,8 @@ u64 ESDevice::D2xLaunchTarget(u64 title_id)
   {
     s_d2x.game_title_id = m_core.m_title_context.tmd.GetTitleId();
     FS::D2xReloadCarry carry;
+    // d2x saves its ES settings (/sys/esp.cfg) only for this reload.
+    carry.es_config = true;
     const auto config = GetEmulationKernel().GetD2xFS()->GetNandConfig();
     if ((config.mode & 3) != 0)
     {
@@ -944,8 +952,7 @@ u64 ESDevice::D2xLaunchTarget(u64 title_id)
                        carry.di_fragments, carry.di_disable_reset);
       }
     }
-    if ((config.mode & 3) != 0 || carry.di_fragments || carry.di_disable_reset)
-      FS::SetReloadCarryForNextIOSBoot(carry);
+    FS::SetReloadCarryForNextIOSBoot(carry);
     NOTICE_LOG_FMT(IOS_ES, "d2x: {:016x} asked for IOS{}; restarting IOS{} in its place",
                    s_d2x.game_title_id, ios, s_d2x.ios);
     return Titles::IOS(s_d2x.ios);

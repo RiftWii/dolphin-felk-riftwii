@@ -176,6 +176,11 @@ struct DiscRange
 };
 }  // namespace
 
+bool DIDevice::HasD2xFragments() const
+{
+  return m_d2x_fragments && GetSystem().GetDVDInterface().HasD2xDisc();
+}
+
 std::optional<DIDevice::DIResult> DIDevice::ConfigureD2xFragments(const IOCtlRequest& request)
 {
   auto& system = GetSystem();
@@ -185,12 +190,12 @@ std::optional<DIDevice::DIResult> DIDevice::ConfigureD2xFragments(const IOCtlReq
   const u32 size = memory.Read_U32(request.buffer_in + 12);
 
   // d2x closes the previous list even when the replacement is refused.
-  if (m_d2x_fragments)
+  if (HasD2xFragments())
   {
     system.GetDVDInterface().SetDisc(nullptr, std::vector<std::string>{});
-    m_d2x_fragments = false;
     ChangePartition(DiscIO::PARTITION_NONE);
   }
+  m_d2x_fragments = false;
   if (device == 0 || address == 0 || size == 0)
     return WriteIfFits(request, 0);
 
@@ -266,7 +271,7 @@ std::optional<DIDevice::DIResult> DIDevice::StartIOCtl(const IOCtlRequest& reque
     case DIIoctl::D2xSetFragments:
       return ConfigureD2xFragments(request);
     case DIIoctl::D2xGetMode:
-      return WriteIfFits(request, m_d2x_fragments ? 0x10 : 0);
+      return WriteIfFits(request, HasD2xFragments() ? 0x10 : 0);
     default:
       break;
     }
@@ -450,7 +455,7 @@ std::optional<DIDevice::DIResult> DIDevice::StartIOCtl(const IOCtlRequest& reque
     const u32 end = position + (length >> 2);  // a 32-bit offset
     INFO_LOG_FMT(IOS_DI, "DVDLowUnencryptedRead: offset {:#010x} (byte {:#011x}), length {:#x}",
                  position, static_cast<u64>(position) << 2, length);
-    if (GetEmulationKernel().IsD2x() && m_d2x_fragments)
+    if (GetEmulationKernel().IsD2x() && HasD2xFragments())
     {
       // d2x allows raw reads throughout the virtual disc. The blob enforces its bounds.
       mmio->Write<u32>(system, ADDRESS_DICMDBUF0, 0xA8000000);
@@ -587,7 +592,7 @@ std::optional<DIDevice::DIResult> DIDevice::StartIOCtl(const IOCtlRequest& reque
   }
   case DIIoctl::DVDLowReadDiskBca:
     INFO_LOG_FMT(IOS_DI, "DVDLowReadDiskBca");
-    if (GetEmulationKernel().IsD2x() && m_d2x_fragments)
+    if (GetEmulationKernel().IsD2x() && HasD2xFragments())
     {
       // d2x stores the BCA at byte 0x100 in its virtual disc.
       mmio->Write<u32>(system, ADDRESS_DICMDBUF0, 0xA8000000);

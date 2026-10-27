@@ -46,7 +46,8 @@ public:
   void DoState(PointerWrap& p) override;
 
   // d2x settings, read and restored when d2x's redirected IOS reload replaces this device.
-  bool HasD2xFragments() const { return m_d2x_fragments; }
+  // A disc change from Dolphin's GUI drops the virtual disc without telling this device.
+  bool HasD2xFragments() const;
   bool IsD2xResetDisabled() const { return m_d2x_disable_reset; }
   void RestoreD2xReloadState(bool fragments, bool disable_reset)
   {

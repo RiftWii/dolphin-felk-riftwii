@@ -383,6 +383,7 @@ EmulationKernel::EmulationKernel(Core::System& system, u64 title_id)
 {
   const auto d2x_carry = FS::TakeReloadCarryForNextIOSBoot();
   const bool carry_nand = d2x_carry.has_value && (d2x_carry.nand_config.mode & 3) != 0;
+  m_d2x_es_config_carried = d2x_carry.has_value && d2x_carry.es_config;
   INFO_LOG_FMT(IOS, "Starting IOS {:016x}", title_id);
 
   if (title_id != Titles::MIOS)
