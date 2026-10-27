@@ -702,10 +702,13 @@ ResultCode D2xFileSystem::Rename(Uid uid, Gid gid, const std::string& old_path,
     {
       for (auto& handle : m_handles)
       {
-        if (handle.opened && (handle.path == old_path || handle.path.starts_with(old_path + '/')))
+        // Handles keep the physical location they were opened in across mode changes.
+        if (handle.opened && handle.drive == RedirectDrive() &&
+            (handle.fat_path == source || handle.fat_path.starts_with(source + '/')))
         {
-          handle.path = new_path + handle.path.substr(old_path.size());
-          handle.fat_path = BuildPath(handle.path);
+          const std::string suffix = handle.fat_path.substr(source.size());
+          handle.path = new_path + UnescapeName(suffix);
+          handle.fat_path = destination + suffix;
         }
       }
     }

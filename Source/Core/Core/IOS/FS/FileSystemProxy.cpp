@@ -25,6 +25,28 @@ namespace IOS::HLE
 {
 using namespace IOS::HLE::FS;
 
+static bool IsD2xMemoryRange(u32 address, size_t size, u32 ram_size, u32 exram_size)
+{
+  address &= 0x3fffffff;
+  if (address < ram_size)
+    return size <= ram_size - address;
+  if (address >= 0x10000000 && address - 0x10000000 < exram_size)
+    return size <= exram_size - (address - 0x10000000);
+  return false;
+}
+
+std::optional<std::string>
+ReadD2xNandPath(u32 address, u32 size, size_t capacity, u32 ram_size, u32 exram_size,
+                const std::function<std::string(u32, size_t)>& read_string)
+{
+  const size_t length = std::min<size_t>(size, capacity);
+  if (length == 0)
+    return std::string{};
+  if (!IsD2xMemoryRange(address, length, ram_size, exram_size))
+    return std::nullopt;
+  return read_string(address, length);
+}
+
 static IPCReply GetFSReply(s32 return_value, SystemTimers::TimeBaseTick extra_tb_ticks = {})
 {
   return IPCReply{return_value, IPC_OVERHEAD_TICKS + extra_tb_ticks};
@@ -824,17 +846,16 @@ IPCReply FSDevice::D2xSetMode(const IOCtlVRequest& request)
   auto& system = GetSystem();
   auto& memory = system.GetMemory();
 
-  if (request.in_vectors.empty() || request.in_vectors[0].size < sizeof(u32))
+  // IOS vectors come from PPC memory and do not validate their own ranges.
+  if (request.in_vectors.empty() || request.in_vectors[0].size < sizeof(u32) ||
+      !IsD2xMemoryRange(request.in_vectors[0].address, sizeof(u32), memory.GetRamSizeReal(),
+                        memory.GetExRamSizeReal()))
   {
     INFO_LOG_FMT(IOS, "/dev/fs: d2x set NAND emulation mode refused: bad vectors");
     return GetFSReply(IPC_ENOENT);
   }
 
   const u32 mode = memory.Read_U32(request.in_vectors[0].address);
-  std::string path;
-  if (request.in_vectors.size() > 1)
-    path = memory.GetString(request.in_vectors[1].address, request.in_vectors[1].size);
-
   if (GetEmulationKernel().GetESCore().IsTitleRunning())
   {
     INFO_LOG_FMT(IOS, "/dev/fs: d2x NAND emulation mode {:#x} refused: a title is running", mode);
@@ -848,7 +869,22 @@ IPCReply FSDevice::D2xSetMode(const IOCtlVRequest& request)
     return GetFSReply(IPC_SUCCESS);
   }
 
-  path.resize(std::min(path.size(), m_core.m_d2x_nand_path.size() - 1));
+  std::string path;
+  // An absent or empty vector selects the root; GetString(..., 0) is unbounded.
+  if (request.in_vectors.size() > 1 && request.in_vectors[1].size != 0)
+  {
+    const auto& vector = request.in_vectors[1];
+    const auto guest_path = ReadD2xNandPath(
+        vector.address, vector.size, m_core.m_d2x_nand_path.size() - 1, memory.GetRamSizeReal(),
+        memory.GetExRamSizeReal(),
+        [&memory](u32 address, size_t length) { return memory.GetString(address, length); });
+    if (!guest_path)
+    {
+      INFO_LOG_FMT(IOS, "/dev/fs: d2x set NAND emulation mode refused: invalid path range");
+      return GetFSReply(IPC_ENOENT);
+    }
+    path = *guest_path;
+  }
   const s32 result = GetEmulationKernel().GetD2xFS()->SetMode(mode, path);
   if (result < 0)
   {

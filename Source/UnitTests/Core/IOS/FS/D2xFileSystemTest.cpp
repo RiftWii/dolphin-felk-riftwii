@@ -318,4 +318,86 @@ TEST(D2xPendingNandConfigTest, TakenOnce)
   const D2xPendingNand second = TakeNandConfigForNextIOSBoot();
   EXPECT_FALSE(second.has_value);
 }
+
+TEST_F(D2xFileSystemTest, RenameDoesNotRetargetHandlesFromAnotherNandFolder)
+{
+  for (const char* folder : {"/nand-a", "/nand-b"})
+    ASSERT_EQ(m_fs->CreateDirectory(0, 0, folder, 0, modes), ResultCode::Success);
+
+  ASSERT_EQ(m_fs->SetMode(0x101, "/nand-a"), 0);
+  ASSERT_EQ(m_fs->CreateFile(0, 0, "/title/a", 0, modes), ResultCode::Success);
+  auto original = m_fs->OpenFile(0, 0, "/title/a", Mode::ReadWrite);
+  ASSERT_TRUE(original);
+
+  ASSERT_EQ(m_fs->SetMode(0x101, "/nand-b"), 0);
+  ASSERT_EQ(m_fs->CreateFile(0, 0, "/title/a", 0, modes), ResultCode::Success);
+  auto renamed = m_fs->OpenFile(0, 0, "/title/a", Mode::ReadWrite);
+  ASSERT_TRUE(renamed);
+  ASSERT_EQ(m_fs->Rename(0, 0, "/title/a", "/title/b"), ResultCode::Success);
+  const u8 first = 0x41;
+  const u8 second = 0x42;
+  ASSERT_TRUE(original->Write(&first, 1));
+  ASSERT_TRUE(renamed->Write(&second, 1));
+  ASSERT_TRUE(renamed->Seek(0, SeekMode::Set));
+  u8 actual = 0;
+  ASSERT_TRUE(renamed->Read(&actual, 1));
+  EXPECT_EQ(actual, second);
+
+  ASSERT_EQ(m_fs->SetMode(0x101, "/nand-a"), 0);
+  auto reader = m_fs->OpenFile(0, 0, "/title/a", Mode::Read);
+  ASSERT_TRUE(reader);
+  ASSERT_TRUE(reader->Read(&actual, 1));
+  EXPECT_EQ(actual, first);
+  EXPECT_FALSE(m_fs->GetMetadata(0, 0, "/title/b"));
+}
+
+TEST_F(D2xFileSystemTest, RenameDoesNotRetargetHandlesFromAnotherDrive)
+{
+  const std::string usb_image = m_directory + "/usb.raw";
+  ASSERT_TRUE(Common::SDCardCreate(128, usb_image));
+  Config::SetCurrent(Config::MAIN_WII_USB_IMAGE_PATH, usb_image);
+  ASSERT_EQ(m_fs->Mount(-1, true), 0);
+
+  ASSERT_EQ(m_fs->CreateFile(0, 0, "/title/a", 0, modes), ResultCode::Success);
+  auto sd_file = m_fs->OpenFile(0, 0, "/title/a", Mode::ReadWrite);
+  ASSERT_TRUE(sd_file);
+  ASSERT_EQ(m_fs->SetMode(0x102, ""), 0);
+  ASSERT_EQ(m_fs->CreateFile(0, 0, "/title/a", 0, modes), ResultCode::Success);
+  auto usb_file = m_fs->OpenFile(0, 0, "/title/a", Mode::ReadWrite);
+  ASSERT_TRUE(usb_file);
+  ASSERT_EQ(m_fs->Rename(0, 0, "/title/a", "/title/b"), ResultCode::Success);
+  const u8 sd_value = 0x53;
+  const u8 usb_value = 0x55;
+  ASSERT_TRUE(sd_file->Write(&sd_value, 1));
+  ASSERT_TRUE(usb_file->Write(&usb_value, 1));
+
+  ASSERT_EQ(m_fs->SetMode(0x101, ""), 0);
+  auto reader = m_fs->OpenFile(0, 0, "/title/a", Mode::Read);
+  ASSERT_TRUE(reader);
+  u8 actual = 0;
+  ASSERT_TRUE(reader->Read(&actual, 1));
+  EXPECT_EQ(actual, sd_value);
+  EXPECT_FALSE(m_fs->GetMetadata(0, 0, "/title/b"));
+  ASSERT_TRUE(usb_file->Seek(0, SeekMode::Set));
+  ASSERT_TRUE(usb_file->Read(&actual, 1));
+  EXPECT_EQ(actual, usb_value);
+}
+
+TEST_F(D2xFileSystemTest, DirectoryRenameUpdatesChildrenButNotSharedPrefixes)
+{
+  for (const char* directory : {"/title/a", "/title/ab"})
+    ASSERT_EQ(m_fs->CreateDirectory(0, 0, directory, 0, modes), ResultCode::Success);
+  for (const char* path : {"/title/a/child?", "/title/ab/child?"})
+    ASSERT_EQ(m_fs->CreateFile(0, 0, path, 0, modes), ResultCode::Success);
+  auto child = m_fs->OpenFile(0, 0, "/title/a/child?", Mode::ReadWrite);
+  auto sibling = m_fs->OpenFile(0, 0, "/title/ab/child?", Mode::ReadWrite);
+  ASSERT_TRUE(child);
+  ASSERT_TRUE(sibling);
+  ASSERT_EQ(m_fs->Rename(0, 0, "/title/a", "/title/b"), ResultCode::Success);
+  const u8 value = 0x61;
+  ASSERT_TRUE(child->Write(&value, 1));
+  ASSERT_TRUE(sibling->Write(&value, 1));
+  EXPECT_EQ(m_fs->GetMetadata(0, 0, "/title/b/child?")->size, 1u);
+  EXPECT_EQ(m_fs->GetMetadata(0, 0, "/title/ab/child?")->size, 1u);
+}
 }  // namespace

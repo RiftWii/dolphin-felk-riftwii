@@ -4,6 +4,8 @@
 #pragma once
 
 #include <array>
+#include <cstddef>
+#include <functional>
 #include <map>
 #include <optional>
 #include <string>
@@ -18,6 +20,12 @@ class PointerWrap;
 
 namespace IOS::HLE
 {
+// Validates the bounded guest range before invoking the reader. An empty vector
+// selects the NAND root and must not invoke GetString's unbounded zero-size mode.
+std::optional<std::string>
+ReadD2xNandPath(u32 address, u32 size, size_t capacity, u32 ram_size, u32 exram_size,
+                const std::function<std::string(u32, size_t)>& read_string);
+
 constexpr FS::Fd INVALID_FD = 0xffffffff;
 
 class FSDevice;
