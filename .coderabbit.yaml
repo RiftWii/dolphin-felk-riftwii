@@ -1,0 +1,37 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+language: en-GB
+
+reviews:
+  # Dig harder on each review, since reviews are scarce.
+  profile: assertive
+  high_level_summary: true
+
+  auto_review:
+    # Manual triggers only, so pushes don't spend the hourly allowance.
+    enabled: false
+
+  path_filters:
+    - "!Externals/**"
+    - "!Languages/**"
+
+  path_instructions:
+    - path: "Source/Core/Core/IOS/**"
+      instructions: |
+        This fork emulates the d2x cIOS so RiftWii can be tested in Dolphin.
+        Behaviour that deliberately matches d2x (es-plugin/plugin.c, the FFS
+        and disc plugins) is intentional. Flag it only if it risks data loss
+        or crashes in Dolphin, and say whether real d2x would behave the same.
+        Changes to Dolphin's existing upstream behaviour (savestate undo,
+        SD card emulation) are out of scope unless this PR changes them.
+    - path: "Source/Core/Core/**"
+      instructions: |
+        Any change to serialised state (DoState, p.Do) must bump
+        STATE_VERSION in Source/Core/Core/State.cpp. Flag it if missing.
+    - path: "Source/UnitTests/**"
+      instructions: |
+        Check that new d2x behaviour has tests covering failure paths,
+        not only the success path.
+    - path: "RIFTWII-D2X*.md"
+      instructions: |
+        Check that the documented status, file lists and limitations
+        match the code in this PR.
