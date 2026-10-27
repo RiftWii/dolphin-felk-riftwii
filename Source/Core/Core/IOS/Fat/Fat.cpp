@@ -75,7 +75,8 @@ std::optional<IPCReply> FatDevice::IOCtlV(const IOCtlVRequest& request)
     // redirected reload carrying NAND emulation).
     if (!started && !GetEmulationKernel().GetD2xFS()->GetNandConfig().volume_mounted[usb ? 1 : 0])
     {
-      INFO_LOG_FMT(IOS, "fat: unmount SD card failed: the card was not started");
+      INFO_LOG_FMT(IOS, "fat: unmount {} failed: the {} was not started", usb ? "USB" : "SD card",
+                   usb ? "drive" : "card");
       return IPCReply(IPC_EINVAL);
     }
     started = false;
