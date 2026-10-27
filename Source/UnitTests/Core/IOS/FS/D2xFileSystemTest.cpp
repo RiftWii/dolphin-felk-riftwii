@@ -6,6 +6,7 @@
 #include <string>
 #include <vector>
 
+#include <fmt/format.h>
 #include <gtest/gtest.h>
 
 #include "Common/ChunkFile.h"
@@ -16,6 +17,7 @@
 #include "Core/Config/MainSettings.h"
 #include "Core/IOS/FS/D2xFileSystem.h"
 #include "Core/IOS/FS/HostBackend/FS.h"
+#include "Core/IOS/IOS.h"
 
 using namespace IOS::HLE::FS;
 
@@ -645,5 +647,61 @@ TEST_F(D2xFileSystemTest, RenameIntoOwnSubfolderIsRefused)
   EXPECT_EQ(m_fs->Rename(0, 0, "/title/a", "/title/a/c"), ResultCode::Invalid);
   EXPECT_EQ(m_fs->Rename(0, 0, "/title/a", "/title/A/c"), ResultCode::Invalid);
   EXPECT_TRUE(m_fs->GetMetadata(0, 0, "/title/a/b/f"));
+}
+
+TEST_F(D2xFileSystemTest, D2xSlotDetection)
+{
+  auto make_slot = [&](u32 slot, u32 magic, u32 block_version, const char* name, u8 base,
+                       size_t content_size) {
+    const std::string prefix = fmt::format("/title/00000001/{:08x}/content/", slot);
+    EXPECT_EQ(m_real->CreateFullPath(0, 0, prefix, 0, modes), ResultCode::Success);
+    const std::string tmd_path = prefix + "title.tmd";
+    EXPECT_EQ(m_real->CreateFile(0, 0, tmd_path, 0, modes), ResultCode::Success);
+    auto tmd_file = m_real->OpenFile(0, 0, tmd_path, Mode::Write);
+    ASSERT_TRUE(tmd_file);
+    std::vector<u8> tmd(0x1e8);
+    tmd[0x1dc] = 0x52;
+    tmd[0x1dd] = 0x07;
+    tmd[0x1e4] = 0x00;
+    tmd[0x1e5] = 0x00;
+    tmd[0x1e6] = 0x00;
+    tmd[0x1e7] = 0x01;
+    EXPECT_TRUE(tmd_file->Write(tmd.data(), tmd.size()));
+    const std::string app_path = prefix + "00000001.app";
+    EXPECT_EQ(m_real->CreateFile(0, 0, app_path, 0, modes), ResultCode::Success);
+    auto app_file = m_real->OpenFile(0, 0, app_path, Mode::Write);
+    ASSERT_TRUE(app_file);
+    std::vector<u8> content(content_size);
+    content[0] = static_cast<u8>(magic >> 24);
+    content[1] = static_cast<u8>(magic >> 16);
+    content[2] = static_cast<u8>(magic >> 8);
+    content[3] = static_cast<u8>(magic);
+    content[4] = static_cast<u8>(block_version >> 24);
+    content[5] = static_cast<u8>(block_version >> 16);
+    content[6] = static_cast<u8>(block_version >> 8);
+    content[7] = static_cast<u8>(block_version);
+    content[0x0f] = base;
+    for (size_t i = 0; i < 3 && name[i] != '\0'; ++i)
+      content[0x10 + i] = static_cast<u8>(name[i]);
+    EXPECT_TRUE(app_file->Write(content.data(), content.size()));
+  };
+
+  make_slot(249, 0x1ee7c105, 1, "d2x", 56, 0x40);
+  EXPECT_TRUE(IOS::HLE::HasD2xSlot(*m_real, 0x00000001000000f9));
+  EXPECT_FALSE(IOS::HLE::HasD2xSlot(*m_real, 0x0000000100000038));
+  EXPECT_FALSE(IOS::HLE::HasD2xSlot(*m_real, 0x00010001000000f9));
+  EXPECT_FALSE(IOS::HLE::HasD2xSlot(*m_real, 0x00000001000000fa));
+  make_slot(251, 0x1ee7c105, 1, "d2x", 56, 0x20);
+  EXPECT_FALSE(IOS::HLE::HasD2xSlot(*m_real, 0x00000001000000fb));
+  make_slot(252, 0x12345678, 1, "d2x", 56, 0x40);
+  EXPECT_FALSE(IOS::HLE::HasD2xSlot(*m_real, 0x00000001000000fc));
+  make_slot(253, 0x1ee7c105, 2, "d2x", 56, 0x40);
+  EXPECT_FALSE(IOS::HLE::HasD2xSlot(*m_real, 0x00000001000000fd));
+  make_slot(254, 0x1ee7c105, 1, "abc", 56, 0x40);
+  EXPECT_FALSE(IOS::HLE::HasD2xSlot(*m_real, 0x00000001000000fe));
+  make_slot(255, 0x1ee7c105, 1, "D2X", 56, 0x40);
+  EXPECT_TRUE(IOS::HLE::HasD2xSlot(*m_real, 0x00000001000000ff));
+  make_slot(248, 0x1ee7c105, 1, "d2x", 1, 0x40);
+  EXPECT_FALSE(IOS::HLE::HasD2xSlot(*m_real, 0x00000001000000f8));
 }
 }  // namespace
