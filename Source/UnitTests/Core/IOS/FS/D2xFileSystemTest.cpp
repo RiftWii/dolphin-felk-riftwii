@@ -495,6 +495,7 @@ TEST(D2xReloadCarryTest, TakenOnce)
   carry.nand_config.volume_offsets = {123, 456};
   carry.di_fragments = true;
   carry.di_disable_reset = true;
+  carry.es_config = true;
   SetReloadCarryForNextIOSBoot(carry);
   const D2xReloadCarry first = TakeReloadCarryForNextIOSBoot();
   EXPECT_TRUE(first.has_value);
@@ -504,10 +505,12 @@ TEST(D2xReloadCarryTest, TakenOnce)
   EXPECT_EQ(first.nand_config.volume_offsets, carry.nand_config.volume_offsets);
   EXPECT_TRUE(first.di_fragments);
   EXPECT_TRUE(first.di_disable_reset);
+  EXPECT_TRUE(first.es_config);
   const D2xReloadCarry second = TakeReloadCarryForNextIOSBoot();
   EXPECT_FALSE(second.has_value);
   EXPECT_FALSE(second.di_fragments);
   EXPECT_FALSE(second.di_disable_reset);
+  EXPECT_FALSE(second.es_config);
 }
 
 TEST(D2xReloadCarryTest, DiOnlyWithNandOff)
@@ -520,6 +523,7 @@ TEST(D2xReloadCarryTest, DiOnlyWithNandOff)
   EXPECT_EQ(first.nand_config.mode, 0u);
   EXPECT_FALSE(first.di_fragments);
   EXPECT_TRUE(first.di_disable_reset);
+  EXPECT_FALSE(first.es_config);
   EXPECT_FALSE(TakeReloadCarryForNextIOSBoot().has_value);
 }
 

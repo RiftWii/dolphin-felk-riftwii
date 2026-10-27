@@ -71,7 +71,9 @@ std::optional<IPCReply> FatDevice::IOCtlV(const IOCtlVRequest& request)
     bool& started = usb ? m_usb_started : m_card_started;
     // d2x answers its driver shutdown's result: 1 (true) when it stopped the
     // driver, IPC_EINVAL when the driver was not running.
-    if (!started)
+    // d2x's file system starts the driver itself when it mounts the volume (SetMode, or a
+    // redirected reload carrying NAND emulation).
+    if (!started && !GetEmulationKernel().GetD2xFS()->GetNandConfig().volume_mounted[usb ? 1 : 0])
     {
       INFO_LOG_FMT(IOS, "fat: unmount SD card failed: the card was not started");
       return IPCReply(IPC_EINVAL);

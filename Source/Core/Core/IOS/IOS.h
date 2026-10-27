@@ -144,6 +144,8 @@ public:
   // then gives the base IOS d2x is built on, whose devices and features Dolphin
   // uses; the slot and d2x's revision are what the PPC sees at 0x80003140.
   bool IsD2x() const { return m_d2x_base != 0; }
+  // d2x's ES settings came across a redirected reload (D2xReloadCarry).
+  bool HasCarriedD2xEsConfig() const { return m_d2x_es_config_carried; }
 
   IOSC& GetIOSC();
 
@@ -157,6 +159,7 @@ protected:
   u64 m_title_id = 0;
   u32 m_d2x_base = 0;  // the base IOS of a d2x slot; 0 when not d2x
   u16 m_d2x_revision = 0;  // d2x's revision (the slot's TMD version)
+  bool m_d2x_es_config_carried = false;
 
   IOSC m_iosc;
   std::shared_ptr<FS::FileSystem> m_fs;
