@@ -102,8 +102,7 @@ bool IsSafePath(std::string_view path)
   return true;
 }
 
-// FatFs matches names without regard to ASCII case. It also finds a folder by its 8.3 short
-// name (ABCDEF~1), which this text comparison can't see; only a guest guessing one gets past it.
+// FatFs matches names without regard to ASCII case.
 bool IsInsideFolder(std::string_view path, std::string_view folder)
 {
   if (path.size() <= folder.size() || path[folder.size()] != '/')
@@ -112,6 +111,52 @@ bool IsInsideFolder(std::string_view path, std::string_view folder)
     return std::tolower(static_cast<unsigned char>(a)) ==
            std::tolower(static_cast<unsigned char>(b));
   });
+}
+
+// The path as the card identifies it: each existing component replaced by its 8.3 short name,
+// which is unique in its folder and the same however the guest spelled it (long name, other
+// case, or the short name itself). Components after the first missing one stay as written.
+std::string ResolveNames(const std::string& path)
+{
+  const std::string_view full{path};
+  const size_t first_slash = full.find('/');
+  if (first_slash == std::string_view::npos)
+    return path;
+  std::string result{full.substr(0, first_slash)};
+  std::string_view rest = full.substr(first_slash + 1);
+  bool missing = false;
+  while (true)
+  {
+    const size_t next_slash = rest.find('/');
+    std::string_view component =
+        next_slash == std::string_view::npos ? rest : rest.substr(0, next_slash);
+    if (!component.empty())
+    {
+      const std::string candidate = result + '/' + std::string{component};
+      if (missing)
+      {
+        result = candidate;
+      }
+      else
+      {
+        FILINFO info{};
+        if (f_stat(candidate.c_str(), &info) != FR_OK)
+        {
+          result = candidate;
+          missing = true;
+        }
+        else
+        {
+          result += '/';
+          result += info.altname[0] != '\0' ? info.altname : info.fname;
+        }
+      }
+    }
+    if (next_slash == std::string_view::npos)
+      break;
+    rest = rest.substr(next_slash + 1);
+  }
+  return result;
 }
 
 std::string GetImagePath(Drive drive)
@@ -823,7 +868,10 @@ ResultCode D2xFileSystem::Rename(Uid uid, Gid gid, const std::string& old_path,
       return result;
     // f_rename doesn't stop a folder moving into itself, which would cut it off from the
     // card; a move onto an ancestor would delete the source with the destination.
-    if (IsInsideFolder(destination, source) || IsInsideFolder(source, destination))
+    const std::string resolved_source = ResolveNames(source);
+    const std::string resolved_destination = ResolveNames(destination);
+    if (IsInsideFolder(resolved_destination, resolved_source) ||
+        IsInsideFolder(resolved_source, resolved_destination))
       return static_cast<int>(FR_INVALID_PARAMETER);
     // d2x replaces existing files and recursively removes destination folders.
     result = f_stat(destination.c_str(), &info);

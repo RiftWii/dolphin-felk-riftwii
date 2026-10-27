@@ -632,6 +632,9 @@ TEST_F(D2xFileSystemTest, SafePathsStillWork)
 
 TEST_F(D2xFileSystemTest, RenameIntoOwnSubfolderOrAncestorIsRefused)
 {
+  ASSERT_EQ(m_fs->CreateDirectory(0, 0, "/title/abcdefghij", 0, modes), ResultCode::Success);
+  EXPECT_EQ(m_fs->Rename(0, 0, "/title/abcdefghij", "/title/ABCDEF~1/c"), ResultCode::Invalid);
+  EXPECT_TRUE(m_fs->GetMetadata(0, 0, "/title/abcdefghij"));
   ASSERT_EQ(m_fs->CreateDirectory(0, 0, "/title/a", 0, modes), ResultCode::Success);
   ASSERT_EQ(m_fs->CreateDirectory(0, 0, "/title/a/b", 0, modes), ResultCode::Success);
   ASSERT_EQ(m_fs->CreateFile(0, 0, "/title/a/b/f", 0, modes), ResultCode::Success);
