@@ -27,6 +27,7 @@ struct WUP028Stats
   bool attached = false;  // the HID module opened it
   bool started = false;   // the start command (0x13) came
   std::array<u8, 4> rumble{};  // the last rumble byte for each port
+  std::array<bool, 4> motors{};  // each controller's motor is running (rumble that reached it)
   u32 reports = 0;             // input reports sent
   u32 short_reports = 0;       // of those, cut short on purpose (EmulateWUP028ShortReportEvery)
   u32 rumble_messages = 0;

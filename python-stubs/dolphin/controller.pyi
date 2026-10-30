@@ -502,6 +502,8 @@ class WUP028State(TypedDict, total=False):
     attached: the Wii side opened it.
     started: the start command (0x13) came.
     rumble: the last rumble byte for each of the four ports.
+    motors: whether each controller's motor is running: rumble reaches only
+    a wired controller with the grey plug in, and 2 (hard stop) stops it.
     reports, short_reports, rumble_messages: counts since it was opened.
     """
     plugged: bool
@@ -512,6 +514,7 @@ class WUP028State(TypedDict, total=False):
     attached: bool
     started: bool
     rumble: tuple[int, int, int, int]
+    motors: tuple[bool, bool, bool, bool]
     reports: int
     short_reports: int
     rumble_messages: int

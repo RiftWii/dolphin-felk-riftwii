@@ -79,6 +79,8 @@ void WUP028USB::UpdateMotors()
     Pad::Rumble(i, on ? 1.0 : 0.0);
     m_motor_on[i] = on;
   }
+  std::lock_guard lk(s_stats_mutex);
+  s_stats.motors = m_motor_on;
 }
 
 DeviceDescriptor WUP028USB::GetDeviceDescriptor() const

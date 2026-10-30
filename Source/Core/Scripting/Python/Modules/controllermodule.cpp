@@ -476,7 +476,8 @@ static PyObject* set_wii_nunchuk_acceleration(PyObject* module, PyObject* args)
 static PyObject* get_wup028(PyObject* module, PyObject* args)
 {
   const IOS::HLE::USB::WUP028Stats stats = IOS::HLE::USB::GetWUP028Stats();
-  return Py_BuildValue("{s:O,s:O,s:O,s:i,s:i,s:O,s:i,s:(iiii),s:I,s:I,s:I}",
+  const auto py_bool = [](bool b) { return b ? Py_True : Py_False; };
+  return Py_BuildValue("{s:O,s:O,s:O,s:i,s:i,s:O,s:i,s:(iiii),s:(OOOO),s:I,s:I,s:I}",
       "plugged", Config::Get(Config::MAIN_EMULATE_WUP028) ? Py_True : Py_False,
       "attached", stats.attached ? Py_True : Py_False,
       "started", stats.started ? Py_True : Py_False,
@@ -485,6 +486,8 @@ static PyObject* get_wup028(PyObject* module, PyObject* args)
       "rumble_power", Config::Get(Config::MAIN_EMULATE_WUP028_RUMBLE_POWER) ? Py_True : Py_False,
       "short_report_every", Config::Get(Config::MAIN_EMULATE_WUP028_SHORT_REPORT_EVERY),
       "rumble", stats.rumble[0], stats.rumble[1], stats.rumble[2], stats.rumble[3],
+      "motors", py_bool(stats.motors[0]), py_bool(stats.motors[1]), py_bool(stats.motors[2]),
+      py_bool(stats.motors[3]),
       "reports", stats.reports,
       "short_reports", stats.short_reports,
       "rumble_messages", stats.rumble_messages);
@@ -920,7 +923,7 @@ class WUP028State(TypedDict, total=False):
     """
     The emulated Wii U GameCube Controller Adapter (get_wup028/set_wup028).
     Settable: plugged, ports, wireless, rumble_power, short_report_every.
-    Read-only: attached, started, rumble, reports, short_reports,
+    Read-only: attached, started, rumble, motors, reports, short_reports,
     rumble_messages.
     """
     plugged: bool
@@ -931,6 +934,7 @@ class WUP028State(TypedDict, total=False):
     attached: bool
     started: bool
     rumble: tuple[int, int, int, int]
+    motors: tuple[bool, bool, bool, bool]
     reports: int
     short_reports: int
     rumble_messages: int
