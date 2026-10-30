@@ -71,9 +71,9 @@ void WUP028USB::UpdateMotors()
   for (int i = 0; i < 4; i++)
   {
     // As on a real adapter: only a wired controller rumbles (a WaveBird has no motor), and only
-    // with the grey plug in.
+    // with the grey plug in. The command is 1 to run, 0 to stop, 2 to stop hard.
     const bool wired_here = (ports & (1 << i)) && !(wireless & (1 << i));
-    const bool on = m_rumble[i] != 0 && wired_here && rumble_power;
+    const bool on = m_rumble[i] == 1 && wired_here && rumble_power;
     if (on == m_motor_on[i])
       continue;
     Pad::Rumble(i, on ? 1.0 : 0.0);
