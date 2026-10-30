@@ -5,7 +5,9 @@
 #include "Scripting/Python/Modules/controllermodule.h"
 
 #include "Core/API/Controller.h"
+#include "Core/Config/MainSettings.h"
 #include "Core/HW/WiimoteEmu/WiimoteEmu.h"
+#include "Core/IOS/USB/Emulated/WUP028.h"
 #include "Scripting/Python/PyScriptingBackend.h"
 #include "Scripting/Python/Utils/module.h"
 
@@ -466,6 +468,49 @@ static PyObject* set_wii_nunchuk_acceleration(PyObject* module, PyObject* args)
   Py_RETURN_NONE;
 }
 
+// The emulated Wii U GameCube Controller Adapter (Core/IOS/USB/Emulated/WUP028.h). Its ports
+// are fed from the GameCube controllers, so set_gc_buttons drives them too. These only plug it
+// in and out, change what's in its ports, and read back what the Wii side did with it.
+static PyObject* get_wup028(PyObject* module, PyObject* args)
+{
+  const IOS::HLE::USB::WUP028Stats stats = IOS::HLE::USB::GetWUP028Stats();
+  return Py_BuildValue("{s:O,s:O,s:O,s:i,s:i,s:O,s:i,s:(iiii),s:I,s:I,s:I}",
+      "plugged", Config::Get(Config::MAIN_EMULATE_WUP028) ? Py_True : Py_False,
+      "attached", stats.attached ? Py_True : Py_False,
+      "started", stats.started ? Py_True : Py_False,
+      "ports", Config::Get(Config::MAIN_EMULATE_WUP028_PORTS),
+      "wireless", Config::Get(Config::MAIN_EMULATE_WUP028_WIRELESS),
+      "rumble_power", Config::Get(Config::MAIN_EMULATE_WUP028_RUMBLE_POWER) ? Py_True : Py_False,
+      "short_report_every", Config::Get(Config::MAIN_EMULATE_WUP028_SHORT_REPORT_EVERY),
+      "rumble", stats.rumble[0], stats.rumble[1], stats.rumble[2], stats.rumble[3],
+      "reports", stats.reports,
+      "short_reports", stats.short_reports,
+      "rumble_messages", stats.rumble_messages);
+}
+
+static PyObject* set_wup028(PyObject* module, PyObject* args)
+{
+  PyObject* dict;
+  if (!PyArg_ParseTuple(args, "O!", &PyDict_Type, &dict))
+    return nullptr;
+
+  // Plugging in and out takes effect on the next USB scan (every 50 ms).
+  if (PyObject* v = PyDict_GetItemString(dict, "plugged"))
+    Config::SetCurrent(Config::MAIN_EMULATE_WUP028, PyObject_IsTrue(v) == 1);
+  if (PyObject* v = PyDict_GetItemString(dict, "ports"))
+    Config::SetCurrent(Config::MAIN_EMULATE_WUP028_PORTS, static_cast<int>(PyLong_AsLong(v)));
+  if (PyObject* v = PyDict_GetItemString(dict, "wireless"))
+    Config::SetCurrent(Config::MAIN_EMULATE_WUP028_WIRELESS, static_cast<int>(PyLong_AsLong(v)));
+  if (PyObject* v = PyDict_GetItemString(dict, "rumble_power"))
+    Config::SetCurrent(Config::MAIN_EMULATE_WUP028_RUMBLE_POWER, PyObject_IsTrue(v) == 1);
+  if (PyObject* v = PyDict_GetItemString(dict, "short_report_every"))
+    Config::SetCurrent(Config::MAIN_EMULATE_WUP028_SHORT_REPORT_EVERY,
+                       static_cast<int>(PyLong_AsLong(v)));
+  if (PyErr_Occurred())
+    return nullptr;
+  Py_RETURN_NONE;
+}
+
 static PyObject* get_gba_buttons(PyObject* module, PyObject* args)
 {
   const auto controller_id_opt = Py::ParseTuple<int>(args);
@@ -870,6 +915,8 @@ PyMODINIT_FUNC PyInit_controller()
       {"set_wii_nunchuk_buttons", set_wii_nunchuk_buttons, METH_VARARGS, ""},
       {"get_wii_nunchuk_acceleration", get_wii_nunchuk_acceleration, METH_VARARGS, ""},
       {"set_wii_nunchuk_acceleration", set_wii_nunchuk_acceleration, METH_VARARGS, ""},
+      {"get_wup028", get_wup028, METH_NOARGS, ""},
+      {"set_wup028", set_wup028, METH_VARARGS, ""},
       {"get_gba_buttons", get_gba_buttons, METH_VARARGS, ""},
       {"set_gba_buttons", set_gba_buttons, METH_VARARGS, ""},
       {"get_wiimote_swing", get_wiimote_swing, METH_VARARGS, ""},

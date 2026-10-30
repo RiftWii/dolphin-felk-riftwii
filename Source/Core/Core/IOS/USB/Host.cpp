@@ -25,6 +25,7 @@
 #include "Core/IOS/USB/Emulated/Infinity.h"
 #include "Core/IOS/USB/Emulated/MassStorage.h"
 #include "Core/IOS/USB/Emulated/Skylanders/Skylander.h"
+#include "Core/IOS/USB/Emulated/WUP028.h"
 #include "Core/IOS/USB/LibusbDevice.h"
 #include "Core/NetPlayProto.h"
 #include "Core/System.h"
@@ -226,6 +227,11 @@ void USBHost::AddEmulatedDevices(std::set<u64>& new_devices, DeviceChangeHooks& 
   {
     auto infinity_base = std::make_unique<USB::InfinityUSB>(GetEmulationKernel(), "Infinity Base");
     CheckAndAddDevice(std::move(infinity_base), new_devices, hooks, always_add_hooks);
+  }
+  if (Config::Get(Config::MAIN_EMULATE_WUP028) && !NetPlay::IsNetPlayRunning())
+  {
+    auto wup028 = std::make_unique<USB::WUP028USB>(GetEmulationKernel(), "GameCube Adapter");
+    CheckAndAddDevice(std::move(wup028), new_devices, hooks, always_add_hooks);
   }
 }
 
