@@ -233,6 +233,12 @@ void USBHost::AddEmulatedDevices(std::set<u64>& new_devices, DeviceChangeHooks& 
     auto wup028 = std::make_unique<USB::WUP028USB>(GetEmulationKernel(), "GameCube Adapter");
     CheckAndAddDevice(std::move(wup028), new_devices, hooks, always_add_hooks);
   }
+  if (Config::Get(Config::MAIN_EMULATE_WUP028_SECOND) && !NetPlay::IsNetPlayRunning())
+  {
+    auto second =
+        std::make_unique<USB::WUP028USB>(GetEmulationKernel(), "GameCube Adapter (second)", 1);
+    CheckAndAddDevice(std::move(second), new_devices, hooks, always_add_hooks);
+  }
 }
 
 void USBHost::CheckAndAddDevice(std::unique_ptr<USB::Device> device, std::set<u64>& new_devices,

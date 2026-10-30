@@ -34,18 +34,20 @@ constexpr u32 REPORT_INTERVAL_US = 8000;
 constexpr u32 SHORT_REPORT_SIZE = 1 + PORT_BYTES;
 
 static std::mutex s_stats_mutex;
-static WUP028Stats s_stats;
-static u32 s_reports_since_short = 0;
+static std::array<WUP028Stats, 2> s_stats;
+static std::array<u32, 2> s_reports_since_short{};
 
-WUP028Stats GetWUP028Stats()
+WUP028Stats GetWUP028Stats(int index)
 {
   std::lock_guard lk(s_stats_mutex);
-  return s_stats;
+  return s_stats[index & 1];
 }
 
-WUP028USB::WUP028USB(EmulationKernel& ios, const std::string& device_name) : m_ios(ios)
+WUP028USB::WUP028USB(EmulationKernel& ios, const std::string& device_name, int index)
+    : m_ios(ios), m_index(index & 1)
 {
-  m_id = (u64(m_vid) << 32 | u64(m_pid) << 16 | u64(9) << 8 | u64(3));
+  // Two adapters are two devices to IOS: each needs its own id.
+  m_id = (u64(m_vid) << 32 | u64(m_pid) << 16 | u64(9) << 8 | u64(3 + m_index));
 }
 
 WUP028USB::~WUP028USB()
@@ -58,14 +60,14 @@ WUP028USB::~WUP028USB()
   m_rumble = {};
   UpdateMotors();
   std::lock_guard lk(s_stats_mutex);
-  s_stats.attached = false;
-  s_stats.started = false;
-  s_stats.rumble = {};
+  s_stats[m_index].attached = false;
+  s_stats[m_index].started = false;
+  s_stats[m_index].rumble = {};
 }
 
 void WUP028USB::UpdateMotors()
 {
-  const int ports = Config::Get(Config::MAIN_EMULATE_WUP028_PORTS);
+  const int ports = Ports();
   const int wireless = Config::Get(Config::MAIN_EMULATE_WUP028_WIRELESS);
   const bool rumble_power = Config::Get(Config::MAIN_EMULATE_WUP028_RUMBLE_POWER);
   for (int i = 0; i < 4; i++)
@@ -80,7 +82,13 @@ void WUP028USB::UpdateMotors()
     m_motor_on[i] = on;
   }
   std::lock_guard lk(s_stats_mutex);
-  s_stats.motors = m_motor_on;
+  s_stats[m_index].motors = m_motor_on;
+}
+
+int WUP028USB::Ports() const
+{
+  return Config::Get(m_index == 0 ? Config::MAIN_EMULATE_WUP028_PORTS :
+                                    Config::MAIN_EMULATE_WUP028_SECOND_PORTS);
 }
 
 DeviceDescriptor WUP028USB::GetDeviceDescriptor() const
@@ -112,9 +120,9 @@ bool WUP028USB::Attach()
   DEBUG_LOG_FMT(IOS_USB, "[{:04x}:{:04x}] Opening device", m_vid, m_pid);
   m_device_attached = true;
   std::lock_guard lk(s_stats_mutex);
-  s_stats = {};
-  s_stats.attached = true;
-  s_reports_since_short = 0;
+  s_stats[m_index] = {};
+  s_stats[m_index].attached = true;
+  s_reports_since_short[m_index] = 0;
   return true;
 }
 
@@ -207,7 +215,7 @@ int WUP028USB::SubmitTransfer(std::unique_ptr<IntrMessage> cmd)
     m_started = true;
     {
       std::lock_guard lk(s_stats_mutex);
-      s_stats.started = true;
+      s_stats[m_index].started = true;
     }
     while (!m_waiting_reads.empty())
     {
@@ -222,8 +230,8 @@ int WUP028USB::SubmitTransfer(std::unique_ptr<IntrMessage> cmd)
                  m_rumble[1], m_rumble[2], m_rumble[3]);
     {
       std::lock_guard lk(s_stats_mutex);
-      s_stats.rumble = m_rumble;
-      s_stats.rumble_messages++;
+      s_stats[m_index].rumble = m_rumble;
+      s_stats[m_index].rumble_messages++;
     }
     UpdateMotors();
   }
@@ -250,7 +258,7 @@ void WUP028USB::SendReport(std::unique_ptr<IntrMessage> cmd)
   // A setting changed since the last report (a port emptied, the grey plug out) stops its motor.
   UpdateMotors();
 
-  const int ports = Config::Get(Config::MAIN_EMULATE_WUP028_PORTS);
+  const int ports = Ports();
   const int wireless = Config::Get(Config::MAIN_EMULATE_WUP028_WIRELESS);
   const bool rumble_power = Config::Get(Config::MAIN_EMULATE_WUP028_RUMBLE_POWER);
   const int short_every = Config::Get(Config::MAIN_EMULATE_WUP028_SHORT_REPORT_EVERY);
@@ -284,12 +292,12 @@ void WUP028USB::SendReport(std::unique_ptr<IntrMessage> cmd)
   bool cut_short = false;
   {
     std::lock_guard lk(s_stats_mutex);
-    s_stats.reports++;
-    if (short_every > 0 && ++s_reports_since_short >= u32(short_every))
+    s_stats[m_index].reports++;
+    if (short_every > 0 && ++s_reports_since_short[m_index] >= u32(short_every))
     {
-      s_reports_since_short = 0;
+      s_reports_since_short[m_index] = 0;
       cut_short = true;
-      s_stats.short_reports++;
+      s_stats[m_index].short_reports++;
     }
   }
   if (cut_short)

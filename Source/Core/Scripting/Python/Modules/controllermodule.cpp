@@ -475,9 +475,11 @@ static PyObject* set_wii_nunchuk_acceleration(PyObject* module, PyObject* args)
 // in and out, change what's in its ports, and read back what the Wii side did with it.
 static PyObject* get_wup028(PyObject* module, PyObject* args)
 {
-  const IOS::HLE::USB::WUP028Stats stats = IOS::HLE::USB::GetWUP028Stats();
+  const IOS::HLE::USB::WUP028Stats stats = IOS::HLE::USB::GetWUP028Stats(0);
+  const IOS::HLE::USB::WUP028Stats second = IOS::HLE::USB::GetWUP028Stats(1);
   const auto py_bool = [](bool b) { return b ? Py_True : Py_False; };
-  return Py_BuildValue("{s:O,s:O,s:O,s:i,s:i,s:O,s:i,s:(iiii),s:(OOOO),s:I,s:I,s:I}",
+  return Py_BuildValue("{s:O,s:O,s:O,s:i,s:i,s:O,s:i,s:(iiii),s:(OOOO),s:I,s:I,s:I,"
+                       "s:O,s:O,s:i,s:I}",
       "plugged", Config::Get(Config::MAIN_EMULATE_WUP028) ? Py_True : Py_False,
       "attached", stats.attached ? Py_True : Py_False,
       "started", stats.started ? Py_True : Py_False,
@@ -490,7 +492,11 @@ static PyObject* get_wup028(PyObject* module, PyObject* args)
       py_bool(stats.motors[3]),
       "reports", stats.reports,
       "short_reports", stats.short_reports,
-      "rumble_messages", stats.rumble_messages);
+      "rumble_messages", stats.rumble_messages,
+      "second_plugged", py_bool(Config::Get(Config::MAIN_EMULATE_WUP028_SECOND)),
+      "second_attached", py_bool(second.attached),
+      "second_ports", Config::Get(Config::MAIN_EMULATE_WUP028_SECOND_PORTS),
+      "second_reports", second.reports);
 }
 
 static PyObject* set_wup028(PyObject* module, PyObject* args)
@@ -530,11 +536,13 @@ static PyObject* set_wup028(PyObject* module, PyObject* args)
     out = static_cast<int>(n);
     return true;
   };
-  std::optional<bool> plugged, rumble_power;
-  std::optional<int> ports, wireless, short_report_every;
+  std::optional<bool> plugged, rumble_power, second_plugged;
+  std::optional<int> ports, wireless, short_report_every, second_ports;
   if (!read_bool("plugged", plugged) || !read_int("ports", 0, 0xF, ports) ||
       !read_int("wireless", 0, 0xF, wireless) || !read_bool("rumble_power", rumble_power) ||
-      !read_int("short_report_every", 0, 1000000, short_report_every))
+      !read_int("short_report_every", 0, 1000000, short_report_every) ||
+      !read_bool("second_plugged", second_plugged) ||
+      !read_int("second_ports", 0, 0xF, second_ports))
   {
     return nullptr;
   }
@@ -550,6 +558,10 @@ static PyObject* set_wup028(PyObject* module, PyObject* args)
     Config::SetCurrent(Config::MAIN_EMULATE_WUP028_RUMBLE_POWER, *rumble_power);
   if (short_report_every)
     Config::SetCurrent(Config::MAIN_EMULATE_WUP028_SHORT_REPORT_EVERY, *short_report_every);
+  if (second_plugged)
+    Config::SetCurrent(Config::MAIN_EMULATE_WUP028_SECOND, *second_plugged);
+  if (second_ports)
+    Config::SetCurrent(Config::MAIN_EMULATE_WUP028_SECOND_PORTS, *second_ports);
   Py_RETURN_NONE;
 }
 
@@ -922,7 +934,8 @@ class GBAInputs(TypedDict, total=False):
 class WUP028State(TypedDict, total=False):
     """
     The emulated Wii U GameCube Controller Adapter (get_wup028/set_wup028).
-    Settable: plugged, ports, wireless, rumble_power, short_report_every.
+    Settable: plugged, ports, wireless, rumble_power, short_report_every,
+    second_plugged, second_ports (a second adapter).
     Read-only: attached, started, rumble, motors, reports, short_reports,
     rumble_messages.
     """

@@ -498,6 +498,8 @@ class WUP028State(TypedDict, total=False):
     rumble_power: its grey plug (rumble power) is in.
     short_report_every: for testing, every how many reports one is cut
     short to 10 bytes (0: never).
+    second_plugged, second_ports: a second adapter beside the first, its
+    ports fed from the same GameCube controllers (port 2 by default).
     Read-only keys (get_wup028):
     attached: the Wii side opened it.
     started: the start command (0x13) came.
@@ -518,6 +520,10 @@ class WUP028State(TypedDict, total=False):
     reports: int
     short_reports: int
     rumble_messages: int
+    second_plugged: bool
+    second_attached: bool
+    second_ports: int
+    second_reports: int
 
 
 def get_wup028() -> WUP028State:

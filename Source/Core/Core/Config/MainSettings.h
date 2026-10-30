@@ -364,6 +364,10 @@ extern const Info<int> MAIN_EMULATE_WUP028_PORTS;
 extern const Info<int> MAIN_EMULATE_WUP028_WIRELESS;
 extern const Info<bool> MAIN_EMULATE_WUP028_RUMBLE_POWER;
 extern const Info<int> MAIN_EMULATE_WUP028_SHORT_REPORT_EVERY;
+// A second adapter beside the first, its ports fed from the same GameCube controllers (its own
+// ports setting, port 2 by default); WaveBirds, rumble power and short reports are shared.
+extern const Info<bool> MAIN_EMULATE_WUP028_SECOND;
+extern const Info<int> MAIN_EMULATE_WUP028_SECOND_PORTS;
 
 // GameCube path utility functions
 

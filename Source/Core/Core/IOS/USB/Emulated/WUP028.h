@@ -32,12 +32,13 @@ struct WUP028Stats
   u32 short_reports = 0;       // of those, cut short on purpose (EmulateWUP028ShortReportEvery)
   u32 rumble_messages = 0;
 };
-WUP028Stats GetWUP028Stats();
+// `index` 0 for the first adapter, 1 for the second (EmulateWUP028Second).
+WUP028Stats GetWUP028Stats(int index = 0);
 
 class WUP028USB final : public Device
 {
 public:
-  WUP028USB(EmulationKernel& ios, const std::string& device_name);
+  WUP028USB(EmulationKernel& ios, const std::string& device_name, int index = 0);
   ~WUP028USB() override;
   DeviceDescriptor GetDeviceDescriptor() const override;
   std::vector<ConfigDescriptor> GetConfigurations() const override;
@@ -56,10 +57,13 @@ public:
 
 private:
   void SendReport(std::unique_ptr<IntrMessage> message);
+  // Which of its ports have a controller: this adapter's own setting.
+  int Ports() const;
   // Starts or stops each controller's motor to match the last rumble command and the settings.
   void UpdateMotors();
 
   EmulationKernel& m_ios;
+  int m_index = 0;  // 0 the first adapter, 1 the second
   u16 m_vid = WUP028_VID;
   u16 m_pid = WUP028_PID;
   u8 m_active_interface = 0;
