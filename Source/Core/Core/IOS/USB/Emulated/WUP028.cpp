@@ -54,10 +54,31 @@ WUP028USB::~WUP028USB()
   // the HID module opened is the adapter, and only its removal ends the run.
   if (!m_device_attached)
     return;
+  // Unplugged: whatever it was rumbling stops.
+  m_rumble = {};
+  UpdateMotors();
   std::lock_guard lk(s_stats_mutex);
   s_stats.attached = false;
   s_stats.started = false;
   s_stats.rumble = {};
+}
+
+void WUP028USB::UpdateMotors()
+{
+  const int ports = Config::Get(Config::MAIN_EMULATE_WUP028_PORTS);
+  const int wireless = Config::Get(Config::MAIN_EMULATE_WUP028_WIRELESS);
+  const bool rumble_power = Config::Get(Config::MAIN_EMULATE_WUP028_RUMBLE_POWER);
+  for (int i = 0; i < 4; i++)
+  {
+    // As on a real adapter: only a wired controller rumbles (a WaveBird has no motor), and only
+    // with the grey plug in.
+    const bool wired_here = (ports & (1 << i)) && !(wireless & (1 << i));
+    const bool on = m_rumble[i] != 0 && wired_here && rumble_power;
+    if (on == m_motor_on[i])
+      continue;
+    Pad::Rumble(i, on ? 1.0 : 0.0);
+    m_motor_on[i] = on;
+  }
 }
 
 DeviceDescriptor WUP028USB::GetDeviceDescriptor() const
@@ -194,21 +215,15 @@ int WUP028USB::SubmitTransfer(std::unique_ptr<IntrMessage> cmd)
   }
   else if (buf[0] == CMD_RUMBLE && cmd->length >= RUMBLE_SIZE)
   {
-    std::array<u8, 4> rumble;
-    std::copy_n(buf + 1, rumble.size(), rumble.begin());
-    INFO_LOG_FMT(IOS_USB, "[{:04x}:{:04x}] Rumble {} {} {} {}", m_vid, m_pid, rumble[0],
-                 rumble[1], rumble[2], rumble[3]);
+    std::copy_n(buf + 1, m_rumble.size(), m_rumble.begin());
+    INFO_LOG_FMT(IOS_USB, "[{:04x}:{:04x}] Rumble {} {} {} {}", m_vid, m_pid, m_rumble[0],
+                 m_rumble[1], m_rumble[2], m_rumble[3]);
     {
       std::lock_guard lk(s_stats_mutex);
-      s_stats.rumble = rumble;
+      s_stats.rumble = m_rumble;
       s_stats.rumble_messages++;
     }
-    const int ports = Config::Get(Config::MAIN_EMULATE_WUP028_PORTS);
-    for (int i = 0; i < 4; i++)
-    {
-      if (ports & (1 << i))
-        Pad::Rumble(i, rumble[i] ? 1.0 : 0.0);
-    }
+    UpdateMotors();
   }
   else
   {
@@ -230,6 +245,9 @@ int WUP028USB::SubmitTransfer(std::unique_ptr<IsoMessage> cmd)
 
 void WUP028USB::SendReport(std::unique_ptr<IntrMessage> cmd)
 {
+  // A setting changed since the last report (a port emptied, the grey plug out) stops its motor.
+  UpdateMotors();
+
   const int ports = Config::Get(Config::MAIN_EMULATE_WUP028_PORTS);
   const int wireless = Config::Get(Config::MAIN_EMULATE_WUP028_WIRELESS);
   const bool rumble_power = Config::Get(Config::MAIN_EMULATE_WUP028_RUMBLE_POWER);

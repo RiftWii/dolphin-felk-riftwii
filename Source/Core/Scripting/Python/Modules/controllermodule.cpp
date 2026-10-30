@@ -4,6 +4,8 @@
 
 #include "Scripting/Python/Modules/controllermodule.h"
 
+#include <optional>
+
 #include "Core/API/Controller.h"
 #include "Core/Config/MainSettings.h"
 #include "Core/HW/WiimoteEmu/WiimoteEmu.h"
@@ -494,20 +496,57 @@ static PyObject* set_wup028(PyObject* module, PyObject* args)
   if (!PyArg_ParseTuple(args, "O!", &PyDict_Type, &dict))
     return nullptr;
 
-  // Plugging in and out takes effect on the next USB scan (every 50 ms).
-  if (PyObject* v = PyDict_GetItemString(dict, "plugged"))
-    Config::SetCurrent(Config::MAIN_EMULATE_WUP028, PyObject_IsTrue(v) == 1);
-  if (PyObject* v = PyDict_GetItemString(dict, "ports"))
-    Config::SetCurrent(Config::MAIN_EMULATE_WUP028_PORTS, static_cast<int>(PyLong_AsLong(v)));
-  if (PyObject* v = PyDict_GetItemString(dict, "wireless"))
-    Config::SetCurrent(Config::MAIN_EMULATE_WUP028_WIRELESS, static_cast<int>(PyLong_AsLong(v)));
-  if (PyObject* v = PyDict_GetItemString(dict, "rumble_power"))
-    Config::SetCurrent(Config::MAIN_EMULATE_WUP028_RUMBLE_POWER, PyObject_IsTrue(v) == 1);
-  if (PyObject* v = PyDict_GetItemString(dict, "short_report_every"))
-    Config::SetCurrent(Config::MAIN_EMULATE_WUP028_SHORT_REPORT_EVERY,
-                       static_cast<int>(PyLong_AsLong(v)));
-  if (PyErr_Occurred())
+  // Every value is read and checked first, so a bad one changes nothing.
+  const auto read_bool = [&](const char* key, std::optional<bool>& out) {
+    PyObject* v = PyDict_GetItemString(dict, key);
+    if (v == nullptr)
+      return true;
+    const int truth = PyObject_IsTrue(v);
+    if (truth < 0)
+      return false;
+    out = truth == 1;
+    return true;
+  };
+  const auto read_int = [&](const char* key, long min, long max, std::optional<int>& out) {
+    PyObject* v = PyDict_GetItemString(dict, key);
+    if (v == nullptr)
+      return true;
+    if (!PyLong_Check(v))
+    {
+      PyErr_Format(PyExc_TypeError, "%s must be an int", key);
+      return false;
+    }
+    const long n = PyLong_AsLong(v);
+    if (PyErr_Occurred())
+      return false;
+    if (n < min || n > max)
+    {
+      PyErr_Format(PyExc_ValueError, "%s must be %ld to %ld", key, min, max);
+      return false;
+    }
+    out = static_cast<int>(n);
+    return true;
+  };
+  std::optional<bool> plugged, rumble_power;
+  std::optional<int> ports, wireless, short_report_every;
+  if (!read_bool("plugged", plugged) || !read_int("ports", 0, 0xF, ports) ||
+      !read_int("wireless", 0, 0xF, wireless) || !read_bool("rumble_power", rumble_power) ||
+      !read_int("short_report_every", 0, 1000000, short_report_every))
+  {
     return nullptr;
+  }
+
+  // Plugging in and out takes effect on the next USB scan (every 50 ms).
+  if (plugged)
+    Config::SetCurrent(Config::MAIN_EMULATE_WUP028, *plugged);
+  if (ports)
+    Config::SetCurrent(Config::MAIN_EMULATE_WUP028_PORTS, *ports);
+  if (wireless)
+    Config::SetCurrent(Config::MAIN_EMULATE_WUP028_WIRELESS, *wireless);
+  if (rumble_power)
+    Config::SetCurrent(Config::MAIN_EMULATE_WUP028_RUMBLE_POWER, *rumble_power);
+  if (short_report_every)
+    Config::SetCurrent(Config::MAIN_EMULATE_WUP028_SHORT_REPORT_EVERY, *short_report_every);
   Py_RETURN_NONE;
 }
 
@@ -875,6 +914,26 @@ class GBAInputs(TypedDict, total=False):
     Down: bool
     Left: bool
     Right: bool
+
+
+class WUP028State(TypedDict, total=False):
+    """
+    The emulated Wii U GameCube Controller Adapter (get_wup028/set_wup028).
+    Settable: plugged, ports, wireless, rumble_power, short_report_every.
+    Read-only: attached, started, rumble, reports, short_reports,
+    rumble_messages.
+    """
+    plugged: bool
+    ports: int
+    wireless: int
+    rumble_power: bool
+    short_report_every: int
+    attached: bool
+    started: bool
+    rumble: tuple[int, int, int, int]
+    reports: int
+    short_reports: int
+    rumble_messages: int
 
 )";
   Py::Object result = Py::LoadPyCodeIntoModule(module, pycode);

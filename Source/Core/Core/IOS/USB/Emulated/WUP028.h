@@ -55,6 +55,8 @@ public:
 
 private:
   void SendReport(std::unique_ptr<IntrMessage> message);
+  // Starts or stops each controller's motor to match the last rumble command and the settings.
+  void UpdateMotors();
 
   EmulationKernel& m_ios;
   u16 m_vid = WUP028_VID;
@@ -62,6 +64,8 @@ private:
   u8 m_active_interface = 0;
   bool m_device_attached = false;
   bool m_started = false;
+  std::array<u8, 4> m_rumble{};       // the last rumble command, per port
+  std::array<bool, 4> m_motor_on{};   // what each controller was last told
   // Reads asked for before the start command: a real adapter sends nothing until then.
   std::queue<std::unique_ptr<IntrMessage>> m_waiting_reads;
 };
