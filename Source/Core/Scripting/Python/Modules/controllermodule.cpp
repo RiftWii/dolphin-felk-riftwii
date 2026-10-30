@@ -937,7 +937,7 @@ class WUP028State(TypedDict, total=False):
     Settable: plugged, ports, wireless, rumble_power, short_report_every,
     second_plugged, second_ports (a second adapter).
     Read-only: attached, started, rumble, motors, reports, short_reports,
-    rumble_messages.
+    rumble_messages, second_attached, second_reports.
     """
     plugged: bool
     ports: int
@@ -951,6 +951,10 @@ class WUP028State(TypedDict, total=False):
     reports: int
     short_reports: int
     rumble_messages: int
+    second_plugged: bool
+    second_attached: bool
+    second_ports: int
+    second_reports: int
 
 )";
   Py::Object result = Py::LoadPyCodeIntoModule(module, pycode);

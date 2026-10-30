@@ -507,6 +507,7 @@ class WUP028State(TypedDict, total=False):
     motors: whether each controller's motor is running: rumble reaches only
     a wired controller with the grey plug in, and 2 (hard stop) stops it.
     reports, short_reports, rumble_messages: counts since it was opened.
+    second_attached, second_reports: the same for the second adapter.
     """
     plugged: bool
     ports: int
