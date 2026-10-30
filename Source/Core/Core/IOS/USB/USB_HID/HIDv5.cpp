@@ -73,6 +73,9 @@ std::optional<IPCReply> USB_HIDv5::IOCtlV(const IOCtlVRequest& request)
     if (!device)
       return IPCReply(IPC_EINVAL);
     auto host_device = GetDeviceById(device->host_id);
+    // Unplugged since the device was looked up: the scan thread drops it first.
+    if (!host_device)
+      return IPCReply(IPC_ENOENT);
     if (request.request == USB::IOCTLV_USBV5_CTRLMSG)
       host_device->Attach();
     else
@@ -140,7 +143,10 @@ IPCReply USB_HIDv5::CancelEndpoint(USBV5Device& device, const IOCtlRequest& requ
     break;
   }
 
-  GetDeviceById(device.host_id)->CancelTransfer(endpoint);
+  const auto host_device = GetDeviceById(device.host_id);
+  if (!host_device)
+    return IPCReply(IPC_ENOENT);
+  host_device->CancelTransfer(endpoint);
   return IPCReply(IPC_SUCCESS);
 }
 
@@ -153,6 +159,8 @@ IPCReply USB_HIDv5::GetDeviceInfo(USBV5Device& device, const IOCtlRequest& reque
   auto& memory = system.GetMemory();
 
   const std::shared_ptr<USB::Device> host_device = GetDeviceById(device.host_id);
+  if (!host_device)
+    return IPCReply(IPC_ENOENT);
   const u8 alt_setting = memory.Read_U8(request.buffer_in + 8);
 
   memory.Memset(request.buffer_out, 0, request.buffer_out_size);

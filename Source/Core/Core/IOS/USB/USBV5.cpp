@@ -148,6 +148,9 @@ std::optional<IPCReply> USBV5ResourceManager::GetDeviceChange(const IOCtlRequest
 IPCReply USBV5ResourceManager::SetAlternateSetting(USBV5Device& device, const IOCtlRequest& request)
 {
   const auto host_device = GetDeviceById(device.host_id);
+  // Unplugged since the device was looked up: the scan thread drops it first.
+  if (!host_device)
+    return IPCReply(IPC_ENOENT);
   if (!host_device->AttachAndChangeInterface(device.interface_number))
     return IPCReply(-1);
 
@@ -182,6 +185,8 @@ IPCReply USBV5ResourceManager::SuspendResume(USBV5Device& device, const IOCtlReq
   auto& memory = system.GetMemory();
 
   const auto host_device = GetDeviceById(device.host_id);
+  if (!host_device)
+    return IPCReply(IPC_ENOENT);
   const s32 resumed = memory.Read_U32(request.buffer_in + 8);
 
   // Note: this is unimplemented because there's no easy way to do this in a
