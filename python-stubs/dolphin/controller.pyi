@@ -491,6 +491,9 @@ class WUP028State(TypedDict, total=False):
     that reads it through /dev/usb/hid. Its ports are fed from the GameCube
     controllers (port 1 from controller 0, and so on), so set_gc_buttons
     drives them too.
+    As a real controller does, one held at X + Y + Start stops answering
+    about 0.8 s in (its own reset), and its port reads as empty until
+    they're let go.
     Settable keys:
     plugged: the adapter is plugged in (takes effect within 50 ms).
     ports: which of its ports have a controller, bit 0 for port 1.

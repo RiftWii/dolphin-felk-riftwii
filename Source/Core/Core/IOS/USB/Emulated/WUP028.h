@@ -71,6 +71,7 @@ private:
   bool m_started = false;
   std::array<u8, 4> m_rumble{};       // the last rumble command, per port
   std::array<bool, 4> m_motor_on{};   // what each controller was last told
+  std::array<u16, 4> m_reset_held{};  // reports in a row with X + Y + Start held, per port
   // Reads asked for before the start command: a real adapter sends nothing until then.
   std::queue<std::unique_ptr<IntrMessage>> m_waiting_reads;
 };

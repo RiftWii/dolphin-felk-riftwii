@@ -30,6 +30,10 @@ constexpr u8 STATUS_WIRELESS = 0x20;
 constexpr u8 STATUS_RUMBLE_POWER = 0x04;
 // bInterval 8 at full speed: a report every 8 ms, as the adapter sends them.
 constexpr u32 REPORT_INTERVAL_US = 8000;
+// A real controller held at X + Y + Start stops answering about 808 ms in (its own reset; seen on
+// a Wii U with the real adapter) and the adapter shows its port as empty until they're let go:
+// that many reports in a row.
+constexpr u16 RESET_DROP_REPORTS = 808000 / REPORT_INTERVAL_US;
 // A report cut short on purpose (for testing) holds the report ID and port 1 only.
 constexpr u32 SHORT_REPORT_SIZE = 1 + PORT_BYTES;
 
@@ -268,8 +272,25 @@ void WUP028USB::SendReport(std::unique_ptr<IntrMessage> cmd)
   for (int i = 0; i < 4; i++)
   {
     if (!(ports & (1 << i)))
+    {
+      m_reset_held[i] = 0;
       continue;
+    }
     const GCPadStatus pad = Pad::GetStatus(i);
+    // X + Y + Start held: after RESET_DROP_REPORTS the controller stops answering, as a real one
+    // does, until they're let go. Its port reads as empty meanwhile.
+    constexpr u16 reset_buttons = PAD_BUTTON_X | PAD_BUTTON_Y | PAD_BUTTON_START;
+    if ((pad.button & reset_buttons) == reset_buttons)
+    {
+      if (m_reset_held[i] < RESET_DROP_REPORTS)
+        m_reset_held[i]++;
+      if (m_reset_held[i] >= RESET_DROP_REPORTS)
+        continue;
+    }
+    else
+    {
+      m_reset_held[i] = 0;
+    }
     u8* d = report.data() + 1 + i * PORT_BYTES;
     d[0] = (wireless & (1 << i) ? STATUS_WIRELESS : STATUS_WIRED) |
            (rumble_power ? STATUS_RUMBLE_POWER : 0);
