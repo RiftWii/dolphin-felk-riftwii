@@ -356,6 +356,18 @@ void SetUSBDeviceWhitelist(const std::set<std::pair<u16, u16>>& devices);
 
 extern const Info<bool> MAIN_EMULATE_SKYLANDER_PORTAL;
 extern const Info<bool> MAIN_EMULATE_INFINITY_BASE;
+// Nintendo's Wii U GameCube Controller Adapter: which of its ports have a controller (bit 0 for
+// port 1), which of those are WaveBirds, whether its grey plug (rumble power) is in, and, for
+// testing, every how many reports one is cut short (0: never).
+extern const Info<bool> MAIN_EMULATE_WUP028;
+extern const Info<int> MAIN_EMULATE_WUP028_PORTS;
+extern const Info<int> MAIN_EMULATE_WUP028_WIRELESS;
+extern const Info<bool> MAIN_EMULATE_WUP028_RUMBLE_POWER;
+extern const Info<int> MAIN_EMULATE_WUP028_SHORT_REPORT_EVERY;
+// A second adapter beside the first, its ports fed from the same GameCube controllers (its own
+// ports setting, port 2 by default); WaveBirds, rumble power and short reports are shared.
+extern const Info<bool> MAIN_EMULATE_WUP028_SECOND;
+extern const Info<int> MAIN_EMULATE_WUP028_SECOND_PORTS;
 
 // GameCube path utility functions
 

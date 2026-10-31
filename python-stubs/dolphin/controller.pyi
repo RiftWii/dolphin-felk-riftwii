@@ -484,3 +484,68 @@ def set_gba_buttons(controller_id: int, inputs: GBAInputs, /) -> None:
     :param controller_id: 0-based index of the controller
     :param inputs: dictionary describing the input map
     """
+
+class WUP028State(TypedDict, total=False):
+    """
+    The emulated Wii U GameCube Controller Adapter (WUP-028), for Wii homebrew
+    that reads it through /dev/usb/hid. Its ports are fed from the GameCube
+    controllers (port 1 from controller 0, and so on), so set_gc_buttons
+    drives them too.
+    As a real controller does, one held at X + Y + Start stops answering
+    about 0.8 s in (its own reset), and its port reads as empty until
+    they're let go.
+    Settable keys:
+    plugged: the adapter is plugged in (takes effect within 50 ms).
+    ports: which of its ports have a controller, bit 0 for port 1.
+    wireless: which of those are WaveBirds.
+    rumble_power: its grey plug (rumble power) is in.
+    short_report_every: for testing, every how many reports one is cut
+    short to 10 bytes (0: never).
+    second_plugged, second_ports: a second adapter beside the first, its
+    ports fed from the same GameCube controllers (port 2 by default).
+    Read-only keys (get_wup028):
+    attached: the Wii side opened it.
+    started: the start command (0x13) came.
+    rumble: the last rumble byte for each of the four ports.
+    motors: whether each controller's motor is running: rumble reaches only
+    a wired controller with the grey plug in, and 2 (hard stop) stops it.
+    reports, short_reports, rumble_messages: counts since it was opened.
+    second_attached, second_reports: the same for the second adapter.
+    """
+    plugged: bool
+    ports: int
+    wireless: int
+    rumble_power: bool
+    short_report_every: int
+    attached: bool
+    started: bool
+    rumble: tuple[int, int, int, int]
+    motors: tuple[bool, bool, bool, bool]
+    reports: int
+    short_reports: int
+    rumble_messages: int
+    second_plugged: bool
+    second_attached: bool
+    second_ports: int
+    second_reports: int
+
+
+def get_wup028() -> WUP028State:
+    """
+    Retrieves the emulated GameCube adapter's settings and what the Wii side
+    did with it.
+
+    :return: dictionary describing the adapter's state
+    """
+
+
+def set_wup028(state: WUP028State, /) -> None:
+    """
+    Changes the emulated GameCube adapter's settings: plugs it in or out,
+    changes what's in its ports, and so on. Only the settable keys count;
+    omitted keys stay as they are. For example::
+
+        controller.set_wup028({"plugged": False})
+
+    :param state: dictionary of the settings to change
+    """

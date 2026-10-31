@@ -4,8 +4,12 @@
 
 #include "Scripting/Python/Modules/controllermodule.h"
 
+#include <optional>
+
 #include "Core/API/Controller.h"
+#include "Core/Config/MainSettings.h"
 #include "Core/HW/WiimoteEmu/WiimoteEmu.h"
+#include "Core/IOS/USB/Emulated/WUP028.h"
 #include "Scripting/Python/PyScriptingBackend.h"
 #include "Scripting/Python/Utils/module.h"
 
@@ -466,6 +470,101 @@ static PyObject* set_wii_nunchuk_acceleration(PyObject* module, PyObject* args)
   Py_RETURN_NONE;
 }
 
+// The emulated Wii U GameCube Controller Adapter (Core/IOS/USB/Emulated/WUP028.h). Its ports
+// are fed from the GameCube controllers, so set_gc_buttons drives them too. These only plug it
+// in and out, change what's in its ports, and read back what the Wii side did with it.
+static PyObject* get_wup028(PyObject* module, PyObject* args)
+{
+  const IOS::HLE::USB::WUP028Stats stats = IOS::HLE::USB::GetWUP028Stats(0);
+  const IOS::HLE::USB::WUP028Stats second = IOS::HLE::USB::GetWUP028Stats(1);
+  const auto py_bool = [](bool b) { return b ? Py_True : Py_False; };
+  return Py_BuildValue("{s:O,s:O,s:O,s:i,s:i,s:O,s:i,s:(iiii),s:(OOOO),s:I,s:I,s:I,"
+                       "s:O,s:O,s:i,s:I}",
+      "plugged", Config::Get(Config::MAIN_EMULATE_WUP028) ? Py_True : Py_False,
+      "attached", stats.attached ? Py_True : Py_False,
+      "started", stats.started ? Py_True : Py_False,
+      "ports", Config::Get(Config::MAIN_EMULATE_WUP028_PORTS),
+      "wireless", Config::Get(Config::MAIN_EMULATE_WUP028_WIRELESS),
+      "rumble_power", Config::Get(Config::MAIN_EMULATE_WUP028_RUMBLE_POWER) ? Py_True : Py_False,
+      "short_report_every", Config::Get(Config::MAIN_EMULATE_WUP028_SHORT_REPORT_EVERY),
+      "rumble", stats.rumble[0], stats.rumble[1], stats.rumble[2], stats.rumble[3],
+      "motors", py_bool(stats.motors[0]), py_bool(stats.motors[1]), py_bool(stats.motors[2]),
+      py_bool(stats.motors[3]),
+      "reports", stats.reports,
+      "short_reports", stats.short_reports,
+      "rumble_messages", stats.rumble_messages,
+      "second_plugged", py_bool(Config::Get(Config::MAIN_EMULATE_WUP028_SECOND)),
+      "second_attached", py_bool(second.attached),
+      "second_ports", Config::Get(Config::MAIN_EMULATE_WUP028_SECOND_PORTS),
+      "second_reports", second.reports);
+}
+
+static PyObject* set_wup028(PyObject* module, PyObject* args)
+{
+  PyObject* dict;
+  if (!PyArg_ParseTuple(args, "O!", &PyDict_Type, &dict))
+    return nullptr;
+
+  // Every value is read and checked first, so a bad one changes nothing.
+  const auto read_bool = [&](const char* key, std::optional<bool>& out) {
+    PyObject* v = PyDict_GetItemString(dict, key);
+    if (v == nullptr)
+      return true;
+    const int truth = PyObject_IsTrue(v);
+    if (truth < 0)
+      return false;
+    out = truth == 1;
+    return true;
+  };
+  const auto read_int = [&](const char* key, long min, long max, std::optional<int>& out) {
+    PyObject* v = PyDict_GetItemString(dict, key);
+    if (v == nullptr)
+      return true;
+    if (!PyLong_Check(v))
+    {
+      PyErr_Format(PyExc_TypeError, "%s must be an int", key);
+      return false;
+    }
+    const long n = PyLong_AsLong(v);
+    if (PyErr_Occurred())
+      return false;
+    if (n < min || n > max)
+    {
+      PyErr_Format(PyExc_ValueError, "%s must be %ld to %ld", key, min, max);
+      return false;
+    }
+    out = static_cast<int>(n);
+    return true;
+  };
+  std::optional<bool> plugged, rumble_power, second_plugged;
+  std::optional<int> ports, wireless, short_report_every, second_ports;
+  if (!read_bool("plugged", plugged) || !read_int("ports", 0, 0xF, ports) ||
+      !read_int("wireless", 0, 0xF, wireless) || !read_bool("rumble_power", rumble_power) ||
+      !read_int("short_report_every", 0, 1000000, short_report_every) ||
+      !read_bool("second_plugged", second_plugged) ||
+      !read_int("second_ports", 0, 0xF, second_ports))
+  {
+    return nullptr;
+  }
+
+  // Plugging in and out takes effect on the next USB scan (every 50 ms).
+  if (plugged)
+    Config::SetCurrent(Config::MAIN_EMULATE_WUP028, *plugged);
+  if (ports)
+    Config::SetCurrent(Config::MAIN_EMULATE_WUP028_PORTS, *ports);
+  if (wireless)
+    Config::SetCurrent(Config::MAIN_EMULATE_WUP028_WIRELESS, *wireless);
+  if (rumble_power)
+    Config::SetCurrent(Config::MAIN_EMULATE_WUP028_RUMBLE_POWER, *rumble_power);
+  if (short_report_every)
+    Config::SetCurrent(Config::MAIN_EMULATE_WUP028_SHORT_REPORT_EVERY, *short_report_every);
+  if (second_plugged)
+    Config::SetCurrent(Config::MAIN_EMULATE_WUP028_SECOND, *second_plugged);
+  if (second_ports)
+    Config::SetCurrent(Config::MAIN_EMULATE_WUP028_SECOND_PORTS, *second_ports);
+  Py_RETURN_NONE;
+}
+
 static PyObject* get_gba_buttons(PyObject* module, PyObject* args)
 {
   const auto controller_id_opt = Py::ParseTuple<int>(args);
@@ -831,6 +930,32 @@ class GBAInputs(TypedDict, total=False):
     Left: bool
     Right: bool
 
+
+class WUP028State(TypedDict, total=False):
+    """
+    The emulated Wii U GameCube Controller Adapter (get_wup028/set_wup028).
+    Settable: plugged, ports, wireless, rumble_power, short_report_every,
+    second_plugged, second_ports (a second adapter).
+    Read-only: attached, started, rumble, motors, reports, short_reports,
+    rumble_messages, second_attached, second_reports.
+    """
+    plugged: bool
+    ports: int
+    wireless: int
+    rumble_power: bool
+    short_report_every: int
+    attached: bool
+    started: bool
+    rumble: tuple[int, int, int, int]
+    motors: tuple[bool, bool, bool, bool]
+    reports: int
+    short_reports: int
+    rumble_messages: int
+    second_plugged: bool
+    second_attached: bool
+    second_ports: int
+    second_reports: int
+
 )";
   Py::Object result = Py::LoadPyCodeIntoModule(module, pycode);
   if (result.IsNull())
@@ -870,6 +995,8 @@ PyMODINIT_FUNC PyInit_controller()
       {"set_wii_nunchuk_buttons", set_wii_nunchuk_buttons, METH_VARARGS, ""},
       {"get_wii_nunchuk_acceleration", get_wii_nunchuk_acceleration, METH_VARARGS, ""},
       {"set_wii_nunchuk_acceleration", set_wii_nunchuk_acceleration, METH_VARARGS, ""},
+      {"get_wup028", get_wup028, METH_NOARGS, ""},
+      {"set_wup028", set_wup028, METH_VARARGS, ""},
       {"get_gba_buttons", get_gba_buttons, METH_VARARGS, ""},
       {"set_gba_buttons", set_gba_buttons, METH_VARARGS, ""},
       {"get_wiimote_swing", get_wiimote_swing, METH_VARARGS, ""},

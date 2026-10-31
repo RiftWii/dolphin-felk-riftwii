@@ -457,6 +457,8 @@ add_library(core
   IOS/USB/Emulated/Skylanders/SkylanderCrypto.h
   IOS/USB/Emulated/Skylanders/SkylanderFigure.cpp
   IOS/USB/Emulated/Skylanders/SkylanderFigure.h
+  IOS/USB/Emulated/WUP028.cpp
+  IOS/USB/Emulated/WUP028.h
   IOS/USB/Host.cpp
   IOS/USB/Host.h
   IOS/USB/OH0/OH0.cpp

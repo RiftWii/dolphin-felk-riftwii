@@ -412,6 +412,7 @@
     <ClInclude Include="Core\IOS\USB\Emulated\MassStorage.h" />
     <ClInclude Include="Core\IOS\USB\Emulated\Infinity.h" />
     <ClInclude Include="Core\IOS\USB\Emulated\Skylanders\Skylander.h" />
+    <ClInclude Include="Core\IOS\USB\Emulated\WUP028.h" />
     <ClInclude Include="Core\IOS\USB\Emulated\Skylanders\SkylanderCrypto.h" />
     <ClInclude Include="Core\IOS\USB\Emulated\Skylanders\SkylanderFigure.h" />
     <ClInclude Include="Core\IOS\USB\Host.h" />
@@ -1088,6 +1089,7 @@
     <ClCompile Include="Core\IOS\USB\Emulated\MassStorage.cpp" />
     <ClCompile Include="Core\IOS\USB\Emulated\Infinity.cpp" />
     <ClCompile Include="Core\IOS\USB\Emulated\Skylanders\Skylander.cpp" />
+    <ClCompile Include="Core\IOS\USB\Emulated\WUP028.cpp" />
     <ClCompile Include="Core\IOS\USB\Emulated\Skylanders\SkylanderCrypto.cpp" />
     <ClCompile Include="Core\IOS\USB\Emulated\Skylanders\SkylanderFigure.cpp" />
     <ClCompile Include="Core\IOS\USB\Host.cpp" />

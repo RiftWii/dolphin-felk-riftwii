@@ -575,6 +575,21 @@ const Info<bool> MAIN_EMULATE_SKYLANDER_PORTAL{
 const Info<bool> MAIN_EMULATE_INFINITY_BASE{
     {System::Main, "EmulatedUSBDevices", "EmulateInfinityBase"}, false};
 
+const Info<bool> MAIN_EMULATE_WUP028{{System::Main, "EmulatedUSBDevices", "EmulateWUP028"},
+                                     false};
+const Info<int> MAIN_EMULATE_WUP028_PORTS{
+    {System::Main, "EmulatedUSBDevices", "EmulateWUP028Ports"}, 0x1};
+const Info<int> MAIN_EMULATE_WUP028_WIRELESS{
+    {System::Main, "EmulatedUSBDevices", "EmulateWUP028Wireless"}, 0x0};
+const Info<bool> MAIN_EMULATE_WUP028_RUMBLE_POWER{
+    {System::Main, "EmulatedUSBDevices", "EmulateWUP028RumblePower"}, true};
+const Info<int> MAIN_EMULATE_WUP028_SHORT_REPORT_EVERY{
+    {System::Main, "EmulatedUSBDevices", "EmulateWUP028ShortReportEvery"}, 0};
+const Info<bool> MAIN_EMULATE_WUP028_SECOND{
+    {System::Main, "EmulatedUSBDevices", "EmulateWUP028Second"}, false};
+const Info<int> MAIN_EMULATE_WUP028_SECOND_PORTS{
+    {System::Main, "EmulatedUSBDevices", "EmulateWUP028SecondPorts"}, 0x2};
+
 // The reason we need this function is because some memory card code
 // expects to get a non-NTSC-K region even if we're emulating an NTSC-K Wii.
 DiscIO::Region ToGameCubeRegion(DiscIO::Region region)
