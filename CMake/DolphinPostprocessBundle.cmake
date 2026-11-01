@@ -30,8 +30,10 @@ file(GLOB_RECURSE extra_libs "${DOLPHIN_BUNDLE_PATH}/Contents/MacOS/*.dylib")
 # BundleUtilities doesn't support DYLD_FALLBACK_LIBRARY_PATH behavior, which
 # makes it sometimes break on libraries that do weird things with @rpath. Specify
 # equivalent search directories until https://gitlab.kitware.com/cmake/cmake/issues/16625
-# is fixed and in our minimum CMake version.
-set(extra_dirs "/usr/local/lib" "/lib" "/usr/lib")
+# is fixed and in our minimum CMake version. /opt/homebrew/lib is Homebrew's on
+# Apple Silicon (/usr/local/lib is its Intel one): its brotli, which Qt uses,
+# names libbrotlicommon as @rpath/libbrotlicommon.1.dylib.
+set(extra_dirs "/usr/local/lib" "/opt/homebrew/lib" "/lib" "/usr/lib")
 
 # BundleUtilities is overly verbose, so disable most of its messages
 function(message)
